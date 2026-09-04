@@ -1,8 +1,13 @@
 package ch.hftm.model;
 
+import java.util.ArrayList;
+import java.util.List;
+
+import jakarta.persistence.CascadeType;
 import jakarta.persistence.Entity;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.Id;
+import jakarta.persistence.OneToMany;
 
 @Entity
 public class Blog {
@@ -12,6 +17,9 @@ public class Blog {
 
     private String title;
     private String content;
+
+    @OneToMany(mappedBy = "blog", cascade = CascadeType.ALL, orphanRemoval = true)
+    private List<BlogComment> comments = new ArrayList<>();
 
     public Blog() {
     }
@@ -39,5 +47,14 @@ public class Blog {
 
     public void setContent(String content) {
         this.content = content;
+    }
+
+    public List<BlogComment> getComments() {
+        return comments;
+    }
+
+    public void addComment(BlogComment comment) {
+        comment.setBlog(this);
+        comments.add(comment);
     }
 }
