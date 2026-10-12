@@ -3,8 +3,14 @@ package ch.hftm.rest;
 import static io.restassured.RestAssured.given;
 import static org.hamcrest.CoreMatchers.containsString;
 import static org.hamcrest.CoreMatchers.is;
+import static org.hamcrest.CoreMatchers.not;
+import static org.hamcrest.Matchers.containsInAnyOrder;
 import static org.hamcrest.Matchers.greaterThanOrEqualTo;
 import static org.hamcrest.Matchers.hasSize;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import ch.hftm.rest.dto.BlogRequest;
+import ch.hftm.rest.dto.BlogResponse;
+import ch.hftm.rest.dto.CommentRequest;
 import io.quarkus.test.junit.QuarkusTest;
 import io.restassured.http.ContentType;
 import org.junit.jupiter.api.Test;
@@ -15,12 +21,22 @@ class BlogResourceTest {
     private Long createBlog(String title, String content) {
         return given()
                 .contentType(ContentType.JSON)
-                .body("{\"title\": \"" + title + "\", \"content\": \"" + content + "\"}")
+                .body(new BlogRequest(title, content))
                 .when().post("/blogs")
                 .then()
                 .statusCode(201)
                 .header("Location", containsString("/blogs/"))
-                .extract().jsonPath().getLong("id");
+                .extract().as(BlogResponse.class)
+                .id();
+    }
+
+    private void addComment(Long blogId, String text) {
+        given()
+                .contentType(ContentType.JSON)
+                .body(new CommentRequest(text))
+                .when().post("/blogs/{id}/comments", blogId)
+                .then()
+                .statusCode(201);
     }
 
     @Test
@@ -36,12 +52,13 @@ class BlogResourceTest {
     void creatingAndReadingBlog() {
         Long id = createBlog("Created Blog", "Created through REST");
 
-        given()
+        BlogResponse blog = given()
                 .when().get("/blogs/{id}", id)
                 .then()
                 .statusCode(200)
-                .body("title", is("Created Blog"))
-                .body("content", is("Created through REST"));
+                .extract().as(BlogResponse.class);
+
+        assertEquals(new BlogResponse(id, "Created Blog", "Created through REST"), blog);
     }
 
     @Test
@@ -50,10 +67,11 @@ class BlogResourceTest {
 
         given()
                 .contentType(ContentType.JSON)
-                .body("{\"title\": \"After Update\", \"content\": \"After update content\"}")
+                .body(new BlogRequest("After Update", "After update content"))
                 .when().put("/blogs/{id}", id)
                 .then()
                 .statusCode(200)
+                .body("id", is(id.intValue()))
                 .body("title", is("After Update"));
 
         given()
@@ -110,10 +128,11 @@ class BlogResourceTest {
 
         given()
                 .contentType(ContentType.JSON)
-                .body("{\"text\": \"Nice post!\"}")
+                .body(new CommentRequest("Nice post!"))
                 .when().post("/blogs/{id}/comments", id)
                 .then()
                 .statusCode(201)
+                .header("Location", containsString("/blogs/" + id + "/comments/"))
                 .body("text", is("Nice post!"));
 
         given()
@@ -124,13 +143,65 @@ class BlogResourceTest {
                 .body("[0].text", is("Nice post!"));
     }
 
+    // --- DTO contract ----------------------------------------------------
+
+    @Test
+    void blogResponseExposesOnlyIdTitleAndContent() {
+        Long id = createBlog("Blog With Hidden Comments", "Comments are not embedded");
+        addComment(id, "Not part of the blog response");
+
+        given()
+                .when().get("/blogs/{id}", id)
+                .then()
+                .statusCode(200)
+                .body("keySet()", containsInAnyOrder("id", "title", "content"));
+
+        given()
+                .when().get("/blogs")
+                .then()
+                .statusCode(200)
+                .body("[0].keySet()", containsInAnyOrder("id", "title", "content"));
+    }
+
+    @Test
+    void commentResponseHasNoBackReferenceToTheBlog() {
+        Long id = createBlog("Blog For Comment Shape", "Content");
+        addComment(id, "Shape check");
+
+        given()
+                .when().get("/blogs/{id}/comments", id)
+                .then()
+                .statusCode(200)
+                .body("[0].keySet()", containsInAnyOrder("id", "text"));
+    }
+
+    @Test
+    void clientCannotChooseTheIdOfANewBlog() {
+        // BlogRequest has no id field, so a smuggled id is ignored (no mass assignment).
+        int smuggledId = 424242;
+
+        given()
+                .contentType(ContentType.JSON)
+                .body("{\"id\": " + smuggledId + ", \"title\": \"Mass Assignment\", \"content\": \"Tries to set the id\"}")
+                .when().post("/blogs")
+                .then()
+                .statusCode(201)
+                .body("id", not(is(smuggledId)))
+                .body("title", is("Mass Assignment"));
+
+        given()
+                .when().get("/blogs/{id}", smuggledId)
+                .then()
+                .statusCode(404);
+    }
+
     // --- error responses -------------------------------------------------
 
     @Test
     void creatingBlogWithBlankTitleIsRejectedByBeanValidation() {
         given()
                 .contentType(ContentType.JSON)
-                .body("{\"title\": \"   \", \"content\": \"Content is fine\"}")
+                .body(new BlogRequest("   ", "Content is fine"))
                 .when().post("/blogs")
                 .then()
                 .statusCode(400)
@@ -142,12 +213,24 @@ class BlogResourceTest {
     }
 
     @Test
+    void creatingBlogWithTooLongContentIsRejected() {
+        given()
+                .contentType(ContentType.JSON)
+                .body(new BlogRequest("Too Long", "x".repeat(4001)))
+                .when().post("/blogs")
+                .then()
+                .statusCode(400)
+                .body("violations[0].field", is("content"))
+                .body("violations[0].message", is("Content must not exceed 4000 characters"));
+    }
+
+    @Test
     void creatingCommentWithoutTextIsRejectedByBeanValidation() {
         Long id = createBlog("Blog For Invalid Comment", "Content");
 
         given()
                 .contentType(ContentType.JSON)
-                .body("{\"text\": \"\"}")
+                .body(new CommentRequest(""))
                 .when().post("/blogs/{id}/comments", id)
                 .then()
                 .statusCode(400)
@@ -170,7 +253,7 @@ class BlogResourceTest {
     void updatingUnknownBlogReturnsNotFound() {
         given()
                 .contentType(ContentType.JSON)
-                .body("{\"title\": \"Ghost\", \"content\": \"Nobody home\"}")
+                .body(new BlogRequest("Ghost", "Nobody home"))
                 .when().put("/blogs/{id}", 999999)
                 .then()
                 .statusCode(404)

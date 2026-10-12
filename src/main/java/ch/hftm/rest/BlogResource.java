@@ -1,7 +1,11 @@
 package ch.hftm.rest;
 
 import ch.hftm.model.Blog;
-import ch.hftm.model.BlogComment;
+import ch.hftm.rest.dto.BlogMapper;
+import ch.hftm.rest.dto.BlogRequest;
+import ch.hftm.rest.dto.BlogResponse;
+import ch.hftm.rest.dto.CommentRequest;
+import ch.hftm.rest.dto.CommentResponse;
 import ch.hftm.service.BlogService;
 import java.util.List;
 import jakarta.inject.Inject;
@@ -22,12 +26,19 @@ import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
 import jakarta.ws.rs.core.UriInfo;
 
+/**
+ * REST interface for blogs and their comments. Requests and responses use the DTOs from
+ * {@link ch.hftm.rest.dto}; the JPA entities never leave this class.
+ */
 @Path("/blogs")
 @Produces(MediaType.APPLICATION_JSON)
 public class BlogResource {
 
     @Inject
     BlogService blogService;
+
+    @Inject
+    BlogMapper blogMapper;
 
     @Inject
     UriInfo uriInfo;
@@ -38,7 +49,7 @@ public class BlogResource {
      * header caps the number of returned entries.
      */
     @GET
-    public List<Blog> getBlogs(
+    public List<BlogResponse> getBlogs(
             @QueryParam("search") String search,
             @QueryParam("sort") @DefaultValue("id") String sort,
             @QueryParam("order") @DefaultValue("asc") String order,
@@ -47,31 +58,32 @@ public class BlogResource {
         List<Blog> blogs = blogService.getBlogs(search, sort, order);
 
         if (maxResults != null && maxResults < blogs.size()) {
-            return blogs.subList(0, maxResults);
+            blogs = blogs.subList(0, maxResults);
         }
-        return blogs;
+        return blogs.stream().map(blogMapper::toResponse).toList();
     }
 
     @GET
     @Path("/{id}")
-    public Blog getBlog(@PathParam("id") Long id) {
-        return blogService.getBlog(id);
+    public BlogResponse getBlog(@PathParam("id") Long id) {
+        return blogMapper.toResponse(blogService.getBlog(id));
     }
 
     @POST
     @Consumes(MediaType.APPLICATION_JSON)
-    public Response createBlog(@Valid Blog blog) {
+    public Response createBlog(@Valid BlogRequest request) {
+        Blog blog = blogMapper.toEntity(request);
         blogService.addBlog(blog);
 
         var location = uriInfo.getAbsolutePathBuilder().path(String.valueOf(blog.getId())).build();
-        return Response.created(location).entity(blog).build();
+        return Response.created(location).entity(blogMapper.toResponse(blog)).build();
     }
 
     @PUT
     @Path("/{id}")
     @Consumes(MediaType.APPLICATION_JSON)
-    public Blog updateBlog(@PathParam("id") Long id, @Valid Blog blog) {
-        return blogService.updateBlog(id, blog);
+    public BlogResponse updateBlog(@PathParam("id") Long id, @Valid BlogRequest request) {
+        return blogMapper.toResponse(blogService.updateBlog(id, blogMapper.toEntity(request)));
     }
 
     @DELETE
@@ -83,17 +95,17 @@ public class BlogResource {
 
     @GET
     @Path("/{id}/comments")
-    public List<BlogComment> getComments(@PathParam("id") Long id) {
-        return blogService.getCommentsForBlog(id);
+    public List<CommentResponse> getComments(@PathParam("id") Long id) {
+        return blogService.getCommentsForBlog(id).stream().map(blogMapper::toResponse).toList();
     }
 
     @POST
     @Path("/{id}/comments")
     @Consumes(MediaType.APPLICATION_JSON)
-    public Response addComment(@PathParam("id") Long id, @Valid BlogComment comment) {
-        var created = blogService.addCommentToBlog(id, comment.getText());
+    public Response addComment(@PathParam("id") Long id, @Valid CommentRequest request) {
+        var created = blogService.addCommentToBlog(id, request.text());
 
         var location = uriInfo.getAbsolutePathBuilder().path(String.valueOf(created.getId())).build();
-        return Response.created(location).entity(created).build();
+        return Response.created(location).entity(blogMapper.toResponse(created)).build();
     }
 }

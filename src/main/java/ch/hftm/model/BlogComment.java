@@ -1,6 +1,5 @@
 package ch.hftm.model;
 
-import jakarta.json.bind.annotation.JsonbTransient;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.FetchType;
@@ -43,8 +42,6 @@ public class BlogComment {
         this.text = text;
     }
 
-    // Breaks the cycle back to the blog and keeps the lazy relation out of the serializer.
-    @JsonbTransient
     public Blog getBlog() {
         return blog;
     }

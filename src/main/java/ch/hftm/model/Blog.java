@@ -3,7 +3,6 @@ package ch.hftm.model;
 import java.util.ArrayList;
 import java.util.List;
 
-import jakarta.json.bind.annotation.JsonbTransient;
 import jakarta.persistence.CascadeType;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
@@ -24,6 +23,7 @@ public class Blog {
     private String title;
 
     @NotBlank(message = "Content must not be blank")
+    @Size(max = 4000, message = "Content must not exceed 4000 characters")
     @Column(length = 4000)
     private String content;
 
@@ -58,9 +58,6 @@ public class Blog {
         this.content = content;
     }
 
-    // Not part of the JSON representation: comments are served under /blogs/{id}/comments,
-    // which also keeps the lazy relation out of the serializer. DTO mapping follows later.
-    @JsonbTransient
     public List<BlogComment> getComments() {
         return comments;
     }
