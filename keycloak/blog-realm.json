@@ -1,0 +1,102 @@
+{
+  "realm": "blog",
+  "displayName": "Blog",
+  "enabled": true,
+  "accessTokenLifespan": 1800,
+  "roles": {
+    "realm": [
+      {
+        "name": "reader",
+        "description": "Registered reader: may write comments"
+      },
+      {
+        "name": "author",
+        "description": "May create blogs and edit or delete their own blogs"
+      },
+      {
+        "name": "admin",
+        "description": "Moderation: may delete any blog"
+      },
+      {
+        "name": "offline_access",
+        "description": "${role_offline-access}"
+      },
+      {
+        "name": "uma_authorization",
+        "description": "${role_uma_authorization}"
+      },
+      {
+        "name": "default-roles-blog",
+        "description": "${role_default-roles}",
+        "composite": true,
+        "composites": {
+          "realm": ["reader", "offline_access", "uma_authorization"]
+        }
+      }
+    ]
+  },
+  "defaultRole": {
+    "name": "default-roles-blog",
+    "description": "${role_default-roles}",
+    "composite": true
+  },
+  "clients": [
+    {
+      "clientId": "blog-client",
+      "name": "Blog API (development)",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": true,
+      "directAccessGrantsEnabled": true,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "serviceAccountsEnabled": false
+    }
+  ],
+  "users": [
+    {
+      "id": "69859d63-4ed2-4482-beae-5027e6404a81",
+      "username": "alice",
+      "email": "alice@example.com",
+      "emailVerified": true,
+      "firstName": "Alice",
+      "lastName": "Reader",
+      "enabled": true,
+      "credentials": [{ "type": "password", "value": "alice", "temporary": false }],
+      "realmRoles": ["default-roles-blog"]
+    },
+    {
+      "id": "b4b8b584-8662-4d9e-80cb-419a80f1e492",
+      "username": "bob",
+      "email": "bob@example.com",
+      "emailVerified": true,
+      "firstName": "Bob",
+      "lastName": "Author",
+      "enabled": true,
+      "credentials": [{ "type": "password", "value": "bob", "temporary": false }],
+      "realmRoles": ["default-roles-blog", "author"]
+    },
+    {
+      "id": "ba5e16fb-2892-4751-ab75-a940e666e95b",
+      "username": "carol",
+      "email": "carol@example.com",
+      "emailVerified": true,
+      "firstName": "Carol",
+      "lastName": "Author",
+      "enabled": true,
+      "credentials": [{ "type": "password", "value": "carol", "temporary": false }],
+      "realmRoles": ["default-roles-blog", "author"]
+    },
+    {
+      "id": "bdf6bf8c-051c-4ae6-9c70-eb059bbca081",
+      "username": "admin",
+      "email": "admin@example.com",
+      "emailVerified": true,
+      "firstName": "Blog",
+      "lastName": "Admin",
+      "enabled": true,
+      "credentials": [{ "type": "password", "value": "admin", "temporary": false }],
+      "realmRoles": ["default-roles-blog", "admin"]
+    }
+  ]
+}

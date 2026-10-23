@@ -1,0 +1,16 @@
+# Local Keycloak for the blog API - development only.
+# Imports keycloak/blog-realm.json (realm "blog" with roles, client and test users) on first start.
+services:
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.8.1
+    container_name: blog-keycloak
+    command: start-dev --import-realm
+    environment:
+      # Admin console login (realm "master"), not a blog user.
+      KC_BOOTSTRAP_ADMIN_USERNAME: kcadmin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: kcadmin
+    ports:
+      # 8080 is taken by Quarkus, so Keycloak is published on 8180.
+      - "8180:8080"
+    volumes:
+      - ./keycloak:/opt/keycloak/data/import:ro
