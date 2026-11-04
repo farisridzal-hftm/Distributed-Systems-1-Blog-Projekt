@@ -6,8 +6,11 @@ import ch.hftm.rest.dto.BlogRequest;
 import ch.hftm.rest.dto.BlogResponse;
 import ch.hftm.rest.dto.CommentRequest;
 import ch.hftm.rest.dto.CommentResponse;
+import ch.hftm.security.Roles;
 import ch.hftm.service.BlogService;
 import java.util.List;
+import jakarta.annotation.security.PermitAll;
+import jakarta.annotation.security.RolesAllowed;
 import jakarta.inject.Inject;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Positive;
@@ -29,6 +32,9 @@ import jakarta.ws.rs.core.UriInfo;
 /**
  * REST interface for blogs and their comments. Requests and responses use the DTOs from
  * {@link ch.hftm.rest.dto}; the JPA entities never leave this class.
+ *
+ * <p>Reading is public, writing needs a Keycloak token with the matching role. Whether the
+ * caller owns the blog is checked in {@link BlogService}, a role alone is not enough.
  */
 @Path("/blogs")
 @Produces(MediaType.APPLICATION_JSON)
@@ -48,6 +54,7 @@ public class BlogResource {
      * term, {@code sort}/{@code order} decide the ordering and the optional {@code X-Max-Results}
      * header caps the number of returned entries.
      */
+    @PermitAll
     @GET
     public List<BlogResponse> getBlogs(
             @QueryParam("search") String search,
@@ -63,12 +70,14 @@ public class BlogResource {
         return blogs.stream().map(blogMapper::toResponse).toList();
     }
 
+    @PermitAll
     @GET
     @Path("/{id}")
     public BlogResponse getBlog(@PathParam("id") Long id) {
         return blogMapper.toResponse(blogService.getBlog(id));
     }
 
+    @RolesAllowed(Roles.AUTHOR)
     @POST
     @Consumes(MediaType.APPLICATION_JSON)
     public Response createBlog(@Valid BlogRequest request) {
@@ -79,6 +88,7 @@ public class BlogResource {
         return Response.created(location).entity(blogMapper.toResponse(blog)).build();
     }
 
+    @RolesAllowed(Roles.AUTHOR)
     @PUT
     @Path("/{id}")
     @Consumes(MediaType.APPLICATION_JSON)
@@ -86,6 +96,7 @@ public class BlogResource {
         return blogMapper.toResponse(blogService.updateBlog(id, blogMapper.toEntity(request)));
     }
 
+    @RolesAllowed({Roles.AUTHOR, Roles.ADMIN})
     @DELETE
     @Path("/{id}")
     public Response deleteBlog(@PathParam("id") Long id) {
@@ -93,12 +104,14 @@ public class BlogResource {
         return Response.noContent().build();
     }
 
+    @PermitAll
     @GET
     @Path("/{id}/comments")
     public List<CommentResponse> getComments(@PathParam("id") Long id) {
         return blogService.getCommentsForBlog(id).stream().map(blogMapper::toResponse).toList();
     }
 
+    @RolesAllowed(Roles.READER)
     @POST
     @Path("/{id}/comments")
     @Consumes(MediaType.APPLICATION_JSON)

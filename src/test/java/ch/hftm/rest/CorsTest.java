@@ -4,8 +4,14 @@ import static io.restassured.RestAssured.given;
 import static org.hamcrest.CoreMatchers.containsString;
 import static org.hamcrest.CoreMatchers.is;
 import static org.hamcrest.CoreMatchers.nullValue;
+import static ch.hftm.security.TestUsers.BOB;
+import static ch.hftm.security.TestUsers.BOB_ID;
 import ch.hftm.rest.dto.BlogRequest;
+import ch.hftm.security.Roles;
 import io.quarkus.test.junit.QuarkusTest;
+import io.quarkus.test.security.TestSecurity;
+import io.quarkus.test.security.oidc.Claim;
+import io.quarkus.test.security.oidc.OidcSecurity;
 import io.restassured.http.ContentType;
 import org.junit.jupiter.api.Test;
 
@@ -17,19 +23,23 @@ class CorsTest {
 
     @Test
     void preflightFromAllowedOriginIsAccepted() {
+        // The preflight carries no token, so it must pass although PUT itself is protected.
         given()
                 .header("Origin", ALLOWED_ORIGIN)
                 .header("Access-Control-Request-Method", "PUT")
-                .header("Access-Control-Request-Headers", "Content-Type")
+                .header("Access-Control-Request-Headers", "Content-Type, Authorization")
                 .when().options("/blogs/1")
                 .then()
                 .statusCode(200)
                 .header("Access-Control-Allow-Origin", is(ALLOWED_ORIGIN))
                 .header("Access-Control-Allow-Methods", containsString("PUT"))
-                .header("Access-Control-Allow-Headers", containsString("Content-Type"));
+                .header("Access-Control-Allow-Headers", containsString("Content-Type"))
+                .header("Access-Control-Allow-Headers", containsString("Authorization"));
     }
 
     @Test
+    @TestSecurity(user = BOB, roles = {Roles.READER, Roles.AUTHOR})
+    @OidcSecurity(claims = @Claim(key = "sub", value = BOB_ID))
     void createdLocationIsExposedToAllowedOrigin() {
         given()
                 .header("Origin", ALLOWED_ORIGIN)

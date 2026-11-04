@@ -16,10 +16,10 @@ public class BlogMapper {
     }
 
     public BlogResponse toResponse(Blog blog) {
-        return new BlogResponse(blog.getId(), blog.getTitle(), blog.getContent());
+        return new BlogResponse(blog.getId(), blog.getTitle(), blog.getContent(), blog.getAuthorName());
     }
 
     public CommentResponse toResponse(BlogComment comment) {
-        return new CommentResponse(comment.getId(), comment.getText());
+        return new CommentResponse(comment.getId(), comment.getText(), comment.getAuthorName());
     }
 }

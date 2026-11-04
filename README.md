@@ -12,16 +12,21 @@ Alle Endpunkte liefern und erwarten `application/json` (Ausnahme: `GET /hello`, 
 Das Blog ist die Hauptressource. Kommentare sind eine Unterressource eines Blogs und haben
 deshalb keinen eigenen Top-Level-Pfad – ein Kommentar existiert nie ohne Blog.
 
-| Methode  | Pfad                   | Erwartetes Verhalten                                          | Status (Erfolg)  | Status (Fehler) |
-| -------- | ---------------------- | ------------------------------------------------------------- | ---------------- | --------------- |
-| `GET`    | `/blogs`               | Liste aller Blogs, optional gefiltert, sortiert, begrenzt      | `200 OK`         | `400`           |
-| `GET`    | `/blogs/{id}`          | Einzelnes Blog                                                 | `200 OK`         | `404`           |
-| `POST`   | `/blogs`               | Neues Blog anlegen, `Location`-Header zeigt auf die Ressource  | `201 Created`    | `400`           |
-| `PUT`    | `/blogs/{id}`          | Bestehendes Blog vollständig ersetzen (Titel + Inhalt)         | `200 OK`         | `400`, `404`    |
-| `DELETE` | `/blogs/{id}`          | Blog samt seinen Kommentaren löschen                           | `204 No Content` | `404`           |
-| `GET`    | `/blogs/{id}/comments` | Alle Kommentare eines Blogs                                    | `200 OK`         | `404`           |
-| `POST`   | `/blogs/{id}/comments` | Kommentar zu einem Blog hinzufügen                             | `201 Created`    | `400`, `404`    |
-| `GET`    | `/hello`               | Begrüssungstext (aus dem Projekt-Setup)                        | `200 OK`         | –               |
+| Methode  | Pfad                   | Erwartetes Verhalten                                          | Wer darf                              | Status (Erfolg)  | Status (Fehler)            |
+| -------- | ---------------------- | ------------------------------------------------------------- | ------------------------------------- | ---------------- | -------------------------- |
+| `GET`    | `/blogs`               | Liste aller Blogs, optional gefiltert, sortiert, begrenzt      | alle (öffentlich)                     | `200 OK`         | `400`                      |
+| `GET`    | `/blogs/{id}`          | Einzelnes Blog                                                 | alle (öffentlich)                     | `200 OK`         | `404`                      |
+| `POST`   | `/blogs`               | Neues Blog anlegen, `Location`-Header zeigt auf die Ressource  | `author`                              | `201 Created`    | `400`, `401`, `403`        |
+| `PUT`    | `/blogs/{id}`          | Bestehendes Blog vollständig ersetzen (Titel + Inhalt)         | `author`, nur eigene Blogs            | `200 OK`         | `400`, `401`, `403`, `404` |
+| `DELETE` | `/blogs/{id}`          | Blog samt seinen Kommentaren löschen                           | `author` (eigene) oder `admin` (alle) | `204 No Content` | `401`, `403`, `404`        |
+| `GET`    | `/blogs/{id}/comments` | Alle Kommentare eines Blogs                                    | alle (öffentlich)                     | `200 OK`         | `404`                      |
+| `POST`   | `/blogs/{id}/comments` | Kommentar zu einem Blog hinzufügen                             | `reader` (jeder angemeldete Benutzer) | `201 Created`    | `400`, `401`, `404`        |
+| `GET`    | `/hello`               | Begrüssungstext (aus dem Projekt-Setup)                        | alle (öffentlich)                     | `200 OK`         | –                          |
+
+Details und Begründungen stehen im [Berechtigungskonzept](#berechtigungskonzept), wie man es
+ausprobiert unter [Auth-Setup testen](#auth-setup-testen). Die laufende API beschreibt sich
+ausserdem selbst: OpenAPI unter <http://localhost:8080/q/openapi>, Swagger UI unter
+<http://localhost:8080/q/swagger-ui> (Dev-Modus).
 
 `PUT` wurde bewusst gegenüber `PATCH` gewählt: Ein Blog besteht nur aus Titel und Inhalt, ein
 vollständiges Ersetzen ist damit einfacher und idempotent.
@@ -60,21 +65,21 @@ Die REST-Schicht arbeitet nicht mit den JPA-Entitäten, sondern mit eigenen DTOs
 im Paket `ch.hftm.rest.dto`). Die Entitäten verlassen `BlogResource` nie – was die API nach
 aussen zeigt, ist damit unabhängig vom Datenbankmodell.
 
-| DTO               | Verwendet bei                                                 | Gibt frei / nimmt an     | Bewusst **nicht** enthalten                         |
-| ----------------- | ------------------------------------------------------------- | ------------------------ | --------------------------------------------------- |
-| `BlogRequest`     | `POST /blogs`, `PUT /blogs/{id}`                              | `title`, `content`       | `id` (vergibt der Server), Kommentare               |
-| `BlogResponse`    | `GET /blogs`, `GET /blogs/{id}`, Antwort auf `POST` und `PUT` | `id`, `title`, `content` | Kommentarliste (eigene Unterressource), JPA-Interna |
-| `CommentRequest`  | `POST /blogs/{id}/comments`                                   | `text`                   | `id`, Blog (kommt aus dem Pfad, nicht aus dem Body) |
-| `CommentResponse` | `GET /blogs/{id}/comments`, Antwort auf `POST`                | `id`, `text`             | Rückverweis auf das Blog                            |
+| DTO               | Verwendet bei                                                 | Gibt frei / nimmt an               | Bewusst **nicht** enthalten                                      |
+| ----------------- | ------------------------------------------------------------- | ---------------------------------- | ---------------------------------------------------------------- |
+| `BlogRequest`     | `POST /blogs`, `PUT /blogs/{id}`                              | `title`, `content`                 | `id` (vergibt der Server), Autor (kommt aus dem Token), Kommentare |
+| `BlogResponse`    | `GET /blogs`, `GET /blogs/{id}`, Antwort auf `POST` und `PUT` | `id`, `title`, `content`, `author` | Kommentarliste (eigene Unterressource), Keycloak-ID des Autors, JPA-Interna |
+| `CommentRequest`  | `POST /blogs/{id}/comments`                                   | `text`                             | `id`, Blog (kommt aus dem Pfad), Autor (kommt aus dem Token)     |
+| `CommentResponse` | `GET /blogs/{id}/comments`, Antwort auf `POST`                | `id`, `text`, `author`             | Rückverweis auf das Blog, Keycloak-ID des Autors                 |
 
 Beispiel `POST /blogs`:
 
 ```jsonc
-// Request (BlogRequest) – ein mitgeschicktes "id" wird ignoriert
+// Request (BlogRequest) von bob – mitgeschickte Felder "id" oder "author" werden ignoriert
 { "title": "Mein Blog", "content": "Hallo Welt" }
 
-// Response 201 (BlogResponse)
-{ "id": 3, "title": "Mein Blog", "content": "Hallo Welt" }
+// Response 201 (BlogResponse) – "author" ist der Login-Name aus dem Token
+{ "id": 3, "title": "Mein Blog", "content": "Hallo Welt", "author": "bob" }
 ```
 
 #### Wie das Mapping funktioniert
@@ -96,9 +101,12 @@ Response:  JSON ◀──JSON-B── BlogResponse ◀────────�
 
 Das Mapping ist bewusst von Hand geschrieben (`ch.hftm.rest.dto.BlogMapper`, eine CDI-Bean) statt
 mit einer Bibliothek wie MapStruct: Jedes Feld wird ausdrücklich kopiert. Ein neues Feld in einer
-Entität, etwa später ein Autor oder ein internes Moderations-Flag, erscheint erst dann in der API,
-wenn es jemand in DTO und Mapper ergänzt. Bei vier kleinen DTOs ist das ausserdem übersichtlicher
-als eine zusätzliche Abhängigkeit.
+Entität erscheint erst dann in der API, wenn es jemand in DTO und Mapper ergänzt. Bei vier kleinen
+DTOs ist das ausserdem übersichtlicher als eine zusätzliche Abhängigkeit.
+
+Ein Beispiel ist der Autor: Die Entitäten speichern `authorId` (Keycloak-ID, Claim `sub`) und
+`authorName` (Login-Name). Der Mapper gibt nur den Namen als `author` heraus – die ID braucht nur
+der Server für die Besitzprüfung.
 
 Weil keine Entität mehr serialisiert wird, sind die früheren `@JsonbTransient`-Annotationen auf
 `Blog.getComments()` und `BlogComment.getBlog()` entfernt. Die Entitäten wissen nichts mehr von
@@ -142,23 +150,40 @@ Ungültiger Sortierparameter (`400 Bad Request`):
 }
 ```
 
+Kein oder ungültiges Token bei einem geschützten Endpunkt (`401 Unauthorized`): Diese Antwort
+erzeugt Quarkus selbst, mit dem Header `WWW-Authenticate: Bearer`.
+
+Angemeldet, aber nicht berechtigt (`403 Forbidden`) – Rolle fehlt bzw. fremdes Blog. Beide Fälle
+laufen über den `ForbiddenExceptionMapper`:
+
+```json
+{ "status": 403, "error": "Forbidden", "message": "Missing required role" }
+```
+
+```json
+{ "status": 403, "error": "Forbidden", "message": "Only the author may change blog 1" }
+```
+
 ### Beispiele
 
-```shell script
-# Blog anlegen
-curl -i -X POST http://localhost:8080/blogs -H "Content-Type: application/json" -d "{\"title\": \"Mein Blog\", \"content\": \"Hallo Welt\"}"
+Schreibende Aufrufe brauchen ein Token. Wie man es holt, steht unter
+[Auth-Setup testen](#auth-setup-testen); hier liegt es in der Variable `$token` (PowerShell).
 
-# Suchen, sortieren, begrenzen
-curl "http://localhost:8080/blogs?search=hallo&sort=title&order=desc" -H "X-Max-Results: 5"
+```powershell
+# Blog anlegen (als author)
+http POST :8080/blogs "Authorization:Bearer $token" title="Mein Blog" content="Hallo Welt"
 
-# Blog aktualisieren
-curl -X PUT http://localhost:8080/blogs/1 -H "Content-Type: application/json" -d "{\"title\": \"Neuer Titel\", \"content\": \"Neuer Inhalt\"}"
+# Suchen, sortieren, begrenzen (öffentlich)
+http ":8080/blogs?search=hallo&sort=title&order=desc" X-Max-Results:5
 
-# Ungueltiger Request -> 400 mit Feldliste
-curl -i -X POST http://localhost:8080/blogs -H "Content-Type: application/json" -d "{\"title\": \"   \", \"content\": \"Inhalt ist ok\"}"
+# Eigenes Blog aktualisieren
+http PUT :8080/blogs/1 "Authorization:Bearer $token" title="Neuer Titel" content="Neuer Inhalt"
 
-# Kommentar hinzufuegen
-curl -X POST http://localhost:8080/blogs/1/comments -H "Content-Type: application/json" -d "{\"text\": \"Schoener Beitrag!\"}"
+# Ungültiger Request -> 400 mit Feldliste
+http POST :8080/blogs "Authorization:Bearer $token" title="   " content="Inhalt ist ok"
+
+# Kommentar hinzufügen (als reader)
+http POST :8080/blogs/1/comments "Authorization:Bearer $token" text="Schöner Beitrag!"
 ```
 
 ### Aufbau im Code
@@ -168,6 +193,7 @@ curl -X POST http://localhost:8080/blogs/1/comments -H "Content-Type: applicatio
 | REST       | `ch.hftm.rest`        | Pfade, Parameter, Statuscodes                 |
 | DTOs       | `ch.hftm.rest.dto`    | Request-/Response-DTOs und `BlogMapper`       |
 | Mapper     | `ch.hftm.rest.mapper` | Exceptions → einheitliche Fehler-Responses    |
+| Security   | `ch.hftm.security`    | Rollen-Konstanten, `CurrentUser` aus dem Token |
 | Service    | `ch.hftm.service`     | Fachlogik, Transaktionen, Sortier-/Suchregeln |
 | Repository | `ch.hftm.repository`  | Panache-Datenzugriff                          |
 | Model      | `ch.hftm.model`       | JPA-Entitäten inkl. Validierungsregeln        |
@@ -181,10 +207,8 @@ Bewusst noch nicht umgesetzt, um den Umfang klein zu halten:
 - **Kommentare einzeln bearbeiten/löschen**: `PUT`/`DELETE` auf `/blogs/{id}/comments/{commentId}`
   fehlt noch; Kommentare verschwinden aktuell nur zusammen mit ihrem Blog.
 - **Pagination**: Statt `page`/`size` gibt es vorerst nur den Header `X-Max-Results`.
-- **Autor / Zeitstempel**: Blogs und Kommentare haben noch keinen Autor und kein Erstelldatum.
-- **Authentifizierung und Autorisierung**: Alle Endpunkte sind noch offen. Das
-  [Berechtigungskonzept](#berechtigungskonzept) steht, umgesetzt wird es in der nächsten Einheit.
-- **OpenAPI-Dokumentation**: Noch keine `quarkus-smallrye-openapi`-Integration.
+- **Zeitstempel**: Blogs und Kommentare haben einen Autor, aber noch kein Erstelldatum.
+- **Rate Limiting**: Angemeldete Benutzer können beliebig viele Kommentare schreiben (API6).
 
 ## CORS
 
@@ -197,7 +221,7 @@ nur aufrufen, wenn der Server das per CORS erlaubt. Die Konfiguration steht in
 | `quarkus.http.cors.enabled`              | `true`                                           | CORS-Filter von Quarkus einschalten                                                       |
 | `quarkus.http.cors.origins`              | `http://localhost:4200`, `http://localhost:5173` | Standard-Ports der Dev-Server von Angular und Vite                                         |
 | `quarkus.http.cors.methods`              | `GET, POST, PUT, DELETE, OPTIONS`                | Genau die Methoden, die die API anbietet (`OPTIONS` für den Preflight)                     |
-| `quarkus.http.cors.headers`              | `Content-Type, Accept, X-Max-Results`            | `X-Max-Results` ist ein eigener Header; ohne Freigabe blockiert der Browser den Preflight |
+| `quarkus.http.cors.headers`              | `Content-Type, Accept, Authorization, X-Max-Results` | `Authorization` für das Token, `X-Max-Results` ist ein eigener Header. Ohne Freigabe blockiert der Browser den Preflight |
 | `quarkus.http.cors.exposed-headers`      | `Location`                                       | Damit das Frontend nach einem `POST` die URL der neuen Ressource lesen kann               |
 | `quarkus.http.cors.access-control-max-age` | `1H`                                           | Der Browser darf das Preflight-Ergebnis eine Stunde lang zwischenspeichern                |
 
@@ -206,8 +230,7 @@ Bewusst **kein** Wildcard `*`: Anfragen mit einer fremden `Origin` beantwortet Q
 
 Noch offen ist die produktive Origin. Es gibt noch kein Frontend und kein Deployment, deshalb ist
 nur die lokale Entwicklung freigegeben. Sobald das Frontend eine feste URL hat, kommt diese in
-`quarkus.http.cors.origins` dazu. Kommt Authentifizierung hinzu, muss zusätzlich der Header
-`Authorization` erlaubt werden.
+`quarkus.http.cors.origins` dazu.
 
 CORS schützt nur Benutzer im Browser. `curl`, Postman oder andere Server ignorieren CORS
 vollständig – es ersetzt also keine Authentifizierung.
@@ -218,27 +241,26 @@ Einschätzung, welche Risiken für diese Blog-API relevant sind und wie weit sie
 
 | Risiko                                                  | Relevanz         | Status             | Begründung                                                                                                                                                                                                                                                  |
 | ------------------------------------------------------- | ---------------- | ------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **API1** Broken Object Level Authorization              | hoch             | offen              | Blogs sind über fortlaufende IDs adressierbar (`/blogs/1`, `/blogs/2`, …), und jeder darf jedes Blog lesen, ändern und löschen. Es gibt noch keine Besitzer. Nötig: Autor pro Blog und im Service die Prüfung, ob das Blog dem aufrufenden Benutzer gehört. |
-| **API2** Broken Authentication                          | hoch             | offen              | Es gibt keine Authentifizierung. Geplant ist ein Standardverfahren (OIDC/JWT mit `quarkus-oidc` oder `smallrye-jwt`) statt eines eigenen Login-Mechanismus.                                                                                                 |
+| **API1** Broken Object Level Authorization              | hoch             | abgedeckt          | Blogs sind über fortlaufende IDs adressierbar (`/blogs/1`, `/blogs/2`, …). Jedes Blog hat einen Besitzer (`sub` aus dem Token); `BlogService` prüft bei `PUT`/`DELETE`, ob es dem Aufrufer gehört, sonst `403`. Getestet in `BlogSecurityTest` und `KeycloakTokenTest`. |
+| **API2** Broken Authentication                          | hoch             | abgedeckt          | Kein eigener Login-Mechanismus: Keycloak stellt Tokens aus, `quarkus-oidc` prüft Signatur, Aussteller und Ablaufzeit. Ungültige Tokens ergeben `401`. Offen für den Betrieb: HTTPS, damit Tokens nicht mitgelesen werden können. |
 | **API3** Broken Object Property Level Authorization     | hoch             | teilweise abgedeckt | Durch die DTOs: Responses geben nur freigegebene Felder heraus (keine Excessive Data Exposure), Requests nehmen nur `title`/`content`/`text` an, die `id` ist nicht setzbar (keine Mass Assignment, Test `clientCannotChooseTheIdOfANewBlog`). Felder mit rollenabhängiger Sichtbarkeit gibt es noch nicht. |
 | **API4** Unrestricted Resource Consumption              | mittel           | teilweise abgedeckt | Längenlimits per Bean Validation (Titel 120, Inhalt 4000, Kommentar 1000 Zeichen), Sortierfelder per Whitelist. Offen: `GET /blogs` liefert ohne Header alle Blogs (keine Pagination), `X-Max-Results` hat keine Obergrenze, es gibt kein Rate Limiting.     |
-| **API5** Broken Function Level Authorization            | hoch             | offen              | `PUT` und `DELETE` sind verwaltende Funktionen, aber für jeden aufrufbar. Später mit Rollen absichern (`@RolesAllowed`).                                                                                                                                      |
-| **API6** Unrestricted Access to Sensitive Business Flows | mittel          | offen              | Kommentieren ist genau das Beispiel aus der OWASP-Beschreibung: Ein Bot könnte beliebig viele Kommentare posten. Es gibt weder Rate Limiting noch Captcha oder Moderation.                                                                                  |
+| **API5** Broken Function Level Authorization            | hoch             | abgedeckt          | Jeder Endpunkt hat `@PermitAll` oder `@RolesAllowed`; mit `deny-unannotated-endpoints=true` ist ein Endpunkt ohne Annotation gesperrt. Fremde Blogs löschen darf nur `admin`. |
+| **API6** Unrestricted Access to Sensitive Business Flows | mittel          | teilweise abgedeckt | Kommentieren ist genau das Beispiel aus der OWASP-Beschreibung. Es braucht jetzt ein Login, und jeder Kommentar ist einem Konto zugeordnet. Offen: Rate Limiting; ein angemeldeter Bot könnte weiterhin beliebig viele Kommentare posten. |
 | **API7** Server Side Request Forgery                    | nicht relevant   | –                  | Die API ruft keine URLs auf, die von einem Client stammen.                                                                                                                                                                                                  |
 | **API8** Security Misconfiguration                      | mittel           | teilweise abgedeckt | CORS mit expliziten Origins statt `*`; die eigenen Fehler-Responses enthalten keine Stacktraces oder Klassennamen; die Dev UI läuft nur im Dev-Modus. Offen: HTTPS, Security-Header und die produktive CORS-Origin.                                       |
-| **API9** Improper Inventory Management                  | niedrig          | teilweise abgedeckt | Alle Endpunkte sind in dieser README dokumentiert. Offen: keine OpenAPI-Beschreibung, keine Versionierung (z. B. `/v1/blogs`), und der Demo-Endpunkt `/hello` aus dem Projekt-Setup ist noch aktiv.                                                     |
+| **API9** Improper Inventory Management                  | niedrig          | teilweise abgedeckt | Alle Endpunkte sind in dieser README dokumentiert, die OpenAPI-Beschreibung (`/q/openapi`) wird aus dem Code erzeugt und zeigt pro Operation die nötigen Rollen. Offen: keine Versionierung (z. B. `/v1/blogs`), und der Demo-Endpunkt `/hello` ist noch aktiv. |
 | **API10** Unsafe Consumption of APIs                    | nicht relevant   | –                  | Es werden keine Drittanbieter-APIs angebunden.                                                                                                                                                                                                              |
 
-Fazit: Dank der DTOs gibt die API keine internen Felder preis und lässt keine fremden Felder
-setzen (API3); zu lange Texte werden abgelehnt (API4). Die grösste Lücke ist die fehlende
-Authentifizierung (API2), an der API1, API5 und API6 direkt hängen. Sie ist deshalb der nächste
-Schritt – das Konzept dafür folgt im nächsten Abschnitt.
+Fazit: Mit Keycloak und dem Berechtigungskonzept sind die drei Zugriffsrisiken API1, API2 und
+API5 abgedeckt und automatisiert getestet. Dank der DTOs gibt die API keine internen Felder preis
+und lässt weder `id` noch Autor von aussen setzen (API3). Offen bleiben vor allem
+Ressourcen-Begrenzungen: Pagination und Rate Limiting (API4, API6).
 
 ## Berechtigungskonzept
 
-Stand: Konzept. Umgesetzt wird es in der nächsten Einheit mit der Quarkus-OIDC-Extension und
-`@RolesAllowed`. Rollen und Test-Benutzer gibt es bereits im lokalen Keycloak (siehe
-[Keycloak](#keycloak-lokale-entwicklung)).
+Stand: umgesetzt mit `quarkus-oidc` und `@RolesAllowed`, siehe [Umsetzung im Code](#umsetzung-im-code).
+Ausprobieren lässt es sich wie unter [Auth-Setup testen](#auth-setup-testen) beschrieben.
 
 ### Grundsätze
 
@@ -289,7 +311,7 @@ Entwurf nur die Person, die ihn verfasst hat.
 Jede Spalte zeigt einen Benutzer mit genau dieser Rolle (plus der Standardrolle `reader`). Wer
 mehrere Rollen hat, darf alles, was eine davon erlaubt.
 
-| Methode  | Pfad                                         | anonym | `reader` | `author`             | `admin` | Umsetzung (nächste Einheit)                               |
+| Methode  | Pfad                                         | anonym | `reader` | `author`             | `admin` | Umsetzung                                                 |
 | -------- | -------------------------------------------- | ------ | -------- | -------------------- | ------- | --------------------------------------------------------- |
 | `GET`    | `/blogs`, `/blogs/{id}`, `/blogs/{id}/comments` | ja  | ja       | ja                   | ja      | `@PermitAll`                                              |
 | `GET`    | `/hello`                                     | ja     | ja       | ja                   | ja      | `@PermitAll`                                              |
@@ -305,105 +327,146 @@ mehrere Rollen hat, darf alles, was eine davon erlaubt.
   anderem. Ein `404` zum Verstecken des Blogs wäre hier sinnlos, weil Blogs ohnehin öffentlich
   lesbar sind.
 
-### Was sich bei der Umsetzung ändert
+### Umsetzung im Code
 
-- `Blog` und `BlogComment` bekommen einen Besitzer: `authorId` (Claim `sub`, für die
-  Besitzprüfung) und `authorName` (Claim `preferred_username`, für die Anzeige). Die
-  Response-DTOs geben nur `authorName` heraus.
-- Die Beispiel-Blogs aus `DataInitialization` gehören `bob`. Weil die Benutzer-IDs im Realm-Import
-  fest sind, ist `bob` nach jedem Neuimport dieselbe `sub`.
-- In `quarkus.http.cors.headers` kommt `Authorization` dazu, sonst blockiert der Browser Requests
-  mit Token.
+- **Annotationen in `BlogResource`:** Jede Methode trägt `@PermitAll` oder `@RolesAllowed` wie in
+  der Tabelle. Die Rollennamen stehen als Konstanten in `ch.hftm.security.Roles`.
+  `quarkus.security.jaxrs.deny-unannotated-endpoints=true` sperrt jeden Endpunkt ohne Annotation.
+- **Benutzer identifizieren (`ch.hftm.security.CurrentUser`):** eine `@RequestScoped`-Bean, die aus
+  dem `JsonWebToken` die ID (`sub`) und den Login-Namen (`preferred_username`) liest und über die
+  `SecurityIdentity` prüft, ob jemand `admin` ist.
+- **Besitzprüfung in `BlogService`:** Beim Anlegen wird der angemeldete Benutzer Autor von Blog bzw.
+  Kommentar. Beim Ändern und Löschen prüft der Service den Besitz:
 
-## Keycloak (lokale Entwicklung)
+  ```java
+  var blog = getBlog(blogId);
+  if (!currentUser.isAuthorOf(blog)) {
+      throw new BlogAccessDeniedException("Only the author may change blog " + blogId);
+  }
+  ```
 
-Keycloak stellt die Benutzer, Rollen und Tokens bereit. Für die Entwicklung läuft es lokal in
-Docker; alles Nötige ist im Repository, eine manuelle Konfiguration in der Admin-Konsole ist nicht
-nötig.
+  `BlogAccessDeniedException` erweitert Quarkus' `ForbiddenException`. Der
+  `ForbiddenExceptionMapper` macht daraus wie bei einer fehlenden Rolle ein `403` im einheitlichen
+  Fehlerformat.
+- **Startdaten:** Die zwei Blogs aus `DataInitialization` gehören `bob`. Weil die Benutzer-IDs im
+  Realm fest sind, kann `bob` sie nach jedem Neustart bearbeiten.
+- **CORS:** `Authorization` ist als Header freigegeben, sonst blockiert der Browser Requests mit
+  Token.
 
-Voraussetzungen: Docker (Desktop) und [HTTPie](https://httpie.io/cli).
+## Auth-Setup testen
 
-| Datei                       | Inhalt                                                                  |
-| --------------------------- | ----------------------------------------------------------------------- |
-| `docker-compose.yml`        | Keycloak-Container `blog-keycloak` (`quay.io/keycloak/keycloak:26.8.1`) |
-| `keycloak/blog-realm.json`  | Realm `blog` mit Rollen, Client und Test-Benutzern, wird beim Start importiert |
+Keycloak stellt Benutzer, Rollen und Tokens aus, Quarkus prüft nur die Tokens (`quarkus-oidc`,
+Bearer-Token). Keycloak lässt sich auf zwei Arten einbinden. Beide verwenden dieselbe Realm-Datei
+`keycloak/blog-realm.json`, deshalb sind Benutzer, Passwörter, Rollen und sogar die Benutzer-IDs
+identisch. Eine manuelle Konfiguration in der Keycloak-Admin-Konsole ist in keiner Variante nötig.
 
-### Starten und stoppen
+Voraussetzungen: Java 25, Docker (Desktop) und [HTTPie](https://httpie.io/cli).
 
-```shell script
-docker compose up -d
+|                      | Variante 1: Dev Services                   | Variante 2: eigener Container                                                            |
+| -------------------- | ------------------------------------------ | ---------------------------------------------------------------------------------------- |
+| Start                | `./mvnw quarkus:dev`                       | `docker compose up -d`, danach `./mvnw quarkus:dev -Dquarkus.profile=external-keycloak` |
+| Wer startet Keycloak | Quarkus, automatisch beim Start            | Docker Compose, unabhängig von Quarkus                                                   |
+| Keycloak-Port        | `8280` (fest eingestellt für HTTPie)       | `8180`                                                                                   |
+| Lebensdauer          | wird mit Quarkus beendet                   | läuft weiter bis `docker compose stop` bzw. `down`                                       |
+| Gut für              | schnelles Entwickeln, automatisierte Tests | Setup wie im Betrieb, Keycloak überlebt Neustarts der App                                |
+
+In PowerShell muss ein `-D`-Argument in Anführungszeichen stehen:
+`./mvnw quarkus:dev "-Dquarkus.profile=external-keycloak"`. Die App läuft in beiden Fällen auf
+<http://localhost:8080>; der Start dauert wegen der Container ein bis zwei Minuten.
+
+### Wie die Varianten konfiguriert sind
+
+Alles steht in `src/main/resources/application.properties`:
+
+```properties
+quarkus.oidc.client-id=blog-client
+
+# Variante 1: Dev Services importieren dieselbe Realm-Datei
+quarkus.keycloak.devservices.realm-path=keycloak/blog-realm.json
+quarkus.keycloak.devservices.realm-name=blog
+quarkus.keycloak.devservices.image-name=quay.io/keycloak/keycloak:26.8.1
+quarkus.keycloak.devservices.start-command=start-dev
+%dev.quarkus.keycloak.devservices.port=8280
+
+# Variante 2: Ist auth-server-url gesetzt, startet Quarkus keinen eigenen Keycloak
+%external-keycloak.quarkus.oidc.auth-server-url=http://localhost:8180/realms/blog
 ```
 
-Keycloak startet im Dev-Modus (`start-dev --import-realm`) und importiert beim ersten Start
-`keycloak/blog-realm.json`. Nach etwa 20 Sekunden steht `Realm 'blog' imported` und
-`started in …` im Log:
+- **`start-command=start-dev`:** Ohne diese Zeile startet Quarkus Keycloak im Produktionsmodus.
+  Der baut sein Server-Image bei jedem Start neu und war damit langsamer als das Start-Timeout, so
+  dass Dev-Modus und Tests abbrachen.
+- **Profil `external-keycloak`:** Ein eigenes Quarkus-Profil, das nur die URL des eigenen
+  Keycloak setzt. MySQL kommt in beiden Varianten aus den Dev Services.
 
-```shell script
-docker compose logs -f keycloak
-```
+### Test-Benutzer
 
-| Was            | Wo                                                                                         |
-| -------------- | ------------------------------------------------------------------------------------------ |
-| Keycloak       | <http://localhost:8180> (Port 8080 belegt Quarkus)                                          |
-| Admin-Konsole  | <http://localhost:8180/admin>, Login `kcadmin` / `kcadmin` (Realm `master`, kein Blog-Benutzer) |
-| Token-Endpunkt | `http://localhost:8180/realms/blog/protocol/openid-connect/token`                          |
-| Issuer (`iss`) | `http://localhost:8180/realms/blog` – wird in der nächsten Einheit `quarkus.oidc.auth-server-url` |
-
-Der Import läuft nur, wenn der Realm noch nicht existiert. Änderungen aus der Admin-Konsole bleiben
-erhalten, solange der Container existiert (`docker compose stop` / `start`).
-`docker compose down` löscht den Container samt Daten. Das nächste `docker compose up -d`
-importiert den Realm wieder frisch aus der JSON-Datei. Dauerhafte Änderungen gehören deshalb in
-`keycloak/blog-realm.json`.
-
-### Was der Realm-Import einrichtet
-
-- **Realm `blog`** mit einer Access-Token-Lebensdauer von 30 Minuten (Keycloak-Standard: 5) –
-  bequemer beim manuellen Testen.
-- **Realm-Rollen** `reader`, `author` und `admin`. `reader` steckt in der Standardrolle
-  `default-roles-blog` und wird damit jedem Benutzer automatisch zugewiesen.
-- **Client `blog-client`**: öffentlicher Client ohne Secret, nur *Direct Access Grants*
-  (Password Grant) aktiv, damit HTTPie Tokens abholen kann. Der Password Grant ist nur für
-  Entwicklung und Tests gedacht, OAuth 2.1 sieht ihn nicht mehr vor. Ein späteres Frontend nutzt
-  stattdessen den Authorization Code Flow mit PKCE.
-- **Test-Benutzer** mit festen IDs, damit `sub` bei jedem Neuimport gleich bleibt:
-
-| Benutzer | Passwort | Rollen         | Zweck                                                                      |
-| -------- | -------- | -------------- | -------------------------------------------------------------------------- |
-| `alice`  | `alice`  | reader         | Darf nur kommentieren                                                      |
-| `bob`    | `bob`    | reader, author | Schreibt Blogs; die Beispiel-Blogs gehören ab der nächsten Einheit `bob`   |
-| `carol`  | `carol`  | reader, author | Schreibt ebenfalls Blogs – damit lässt sich prüfen, dass fremde Blogs gesperrt sind |
-| `admin`  | `admin`  | reader, admin  | Moderation                                                                 |
+| Benutzer | Passwort | Rollen         | Darf                                                          |
+| -------- | -------- | -------------- | ------------------------------------------------------------- |
+| `alice`  | `alice`  | reader         | lesen, kommentieren                                           |
+| `bob`    | `bob`    | reader, author | zusätzlich Blogs schreiben; die zwei Startblogs gehören `bob` |
+| `carol`  | `carol`  | reader, author | wie `bob` – um zu prüfen, dass fremde Blogs gesperrt sind     |
+| `admin`  | `admin`  | reader, admin  | lesen, kommentieren, jedes Blog löschen                       |
 
 Die Passwörter sind nur für die lokale Entwicklung gedacht. Zusätzlich enthält jedes Token die
 Keycloak-Standardrollen `default-roles-blog`, `offline_access` und `uma_authorization`.
 
-### Access-Token mit HTTPie abholen
+### Token mit HTTPie holen
 
-```shell script
-http --form POST :8180/realms/blog/protocol/openid-connect/token grant_type=password client_id=blog-client username=bob password=bob
-```
-
-Die Antwort enthält `access_token` und `expires_in: 1800`. Bei falschem Passwort antwortet
-Keycloak mit `400` und `"error": "invalid_grant"` (so schreibt es OAuth 2.0 vor, nicht `401`).
-
-Token direkt in eine Variable übernehmen – PowerShell:
+PowerShell – die Funktion holt ein Token per Password Grant, Passwort = Benutzername. Port `8280`
+für Variante 1, `8180` für Variante 2:
 
 ```powershell
-$token = (http --form POST :8180/realms/blog/protocol/openid-connect/token grant_type=password client_id=blog-client username=bob password=bob | ConvertFrom-Json).access_token
+function Get-Token($user, $port = 8280) {
+  (http --form POST ":$port/realms/blog/protocol/openid-connect/token" grant_type=password client_id=blog-client username=$user password=$user | ConvertFrom-Json).access_token
+}
+$bob = Get-Token bob; $carol = Get-Token carol; $alice = Get-Token alice; $admin = Get-Token admin
 ```
 
 Bash (braucht [`jq`](https://jqlang.org/)):
 
 ```shell script
-TOKEN=$(http --form POST :8180/realms/blog/protocol/openid-connect/token grant_type=password client_id=blog-client username=bob password=bob | jq -r .access_token)
+TOKEN=$(http --form POST :8280/realms/blog/protocol/openid-connect/token grant_type=password client_id=blog-client username=bob password=bob | jq -r .access_token)
 ```
 
-Ab der nächsten Einheit wird es so mitgeschickt: `http :8080/blogs "Authorization:Bearer $TOKEN"`.
+Ein Token gilt 30 Minuten. Bei falschem Passwort antwortet Keycloak mit `400` und
+`"error": "invalid_grant"` – so schreibt es OAuth 2.0 vor, nicht `401`.
+
+### Beispielaufrufe mit HTTPie
+
+Mit den Tokens von oben. Die Kommentare zeigen das erwartete Ergebnis, durchgespielt mit beiden
+Varianten:
+
+```powershell
+http :8080/blogs                                                               # 200 öffentlich
+http POST :8080/blogs title="Test" content="Ohne Token"                        # 401 kein Token
+http POST :8080/blogs "Authorization:Bearer $alice" title="Test" content="X"   # 403 Rolle author fehlt
+http POST :8080/blogs "Authorization:Bearer $bob" title="Von bob" content="X"  # 201 "author": "bob"
+http PUT :8080/blogs/1 "Authorization:Bearer $bob" title="Neu" content="X"     # 200 Startblog gehört bob
+http PUT :8080/blogs/1 "Authorization:Bearer $carol" title="Neu" content="X"   # 403 "Only the author may change blog 1"
+http PUT :8080/blogs/1 "Authorization:Bearer $admin" title="Neu" content="X"   # 403 admin darf nicht umschreiben
+http POST :8080/blogs/1/comments "Authorization:Bearer $alice" text="Hallo"    # 201 "author": "alice"
+http DELETE :8080/blogs/2 "Authorization:Bearer $carol"                        # 403 fremdes Blog
+http DELETE :8080/blogs/2 "Authorization:Bearer $admin"                        # 204 Moderation
+http POST :8080/blogs "Authorization:Bearer kaputt" title="Test" content="X"   # 401 ungültiges Token
+```
+
+### Mit dem Swagger UI testen
+
+1. Eine Variante starten und <http://localhost:8080/q/swagger-ui> öffnen. Geschützte Operationen
+   tragen ein Schloss. Welche Rollen nötig sind und dass `401`/`403` möglich sind, erzeugt Quarkus
+   aus den `@RolesAllowed`-Annotationen.
+2. Oben rechts **Authorize** klicken, ein Token von oben einfügen (ohne `Bearer `), dann
+   **Authorize** und **Close**.
+3. Eine Operation aufklappen, **Try it out**, z. B. `PUT /blogs/1` als `bob` → `200`. Nach
+   **Logout** im selben Dialog liefert derselbe Request `401`.
+
+Das Token bleibt dank `quarkus.swagger-ui.persist-authorization=true` auch nach einem Neuladen
+der Seite gesetzt.
 
 ### Rollen im Token prüfen
 
 Das Token auf [jwt.io](https://jwt.io) einfügen. Im Payload stehen die Rollen unter
-`realm_access.roles`. Ausschnitt für `bob`:
+`realm_access.roles`. Ausschnitt für `bob` (Variante 2, bei Variante 1 steht Port `8280` im `iss`):
 
 ```json
 {
@@ -420,11 +483,41 @@ Das Token auf [jwt.io](https://jwt.io) einfügen. Im Payload stehen die Rollen u
 jwt.io dekodiert das Token im Browser. Für diese lokalen Test-Tokens ist das unkritisch, Tokens
 aus echten Systemen gehören aber nicht auf fremde Webseiten.
 
+### Eigenen Keycloak-Container verwalten (Variante 2)
+
+| Was           | Wo                                                                                                  |
+| ------------- | --------------------------------------------------------------------------------------------------- |
+| Keycloak      | <http://localhost:8180>                                                                             |
+| Admin-Konsole | <http://localhost:8180/admin>, Login `kcadmin` / `kcadmin` (Realm `master`, kein Blog-Benutzer)     |
+| Log           | `docker compose logs -f keycloak` – bereit, sobald `Realm 'blog' imported` und `started in` erscheinen |
+
+Der Import läuft nur, wenn der Realm noch nicht existiert. Änderungen aus der Admin-Konsole bleiben
+erhalten, solange der Container existiert (`docker compose stop` / `start`).
+`docker compose down` löscht den Container samt Daten. Das nächste `docker compose up -d`
+importiert den Realm wieder frisch aus der JSON-Datei. Dauerhafte Änderungen gehören deshalb in
+`keycloak/blog-realm.json`, dann gelten sie auch für Variante 1.
+
+### Was der Realm-Import einrichtet
+
+- **Realm `blog`** mit einer Access-Token-Lebensdauer von 30 Minuten (Keycloak-Standard: 5) –
+  bequemer beim manuellen Testen.
+- **Realm-Rollen** `reader`, `author` und `admin`. `reader` steckt in der Standardrolle
+  `default-roles-blog` und wird damit jedem Benutzer automatisch zugewiesen.
+- **Client `blog-client`**: öffentlicher Client ohne Secret, nur *Direct Access Grants*
+  (Password Grant) aktiv, damit HTTPie Tokens abholen kann. Der Password Grant ist nur für
+  Entwicklung und Tests gedacht, OAuth 2.1 sieht ihn nicht mehr vor. Ein späteres Frontend nutzt
+  stattdessen den Authorization Code Flow mit PKCE.
+- **Test-Benutzer** mit festen IDs, damit `sub` bei jedem Import gleich bleibt.
+
 ## Tests
 
 ```shell script
 ./mvnw test
 ```
+
+Docker muss laufen: Für die Tests starten die Dev Services MySQL und Keycloak (mit
+`keycloak/blog-realm.json`). Der erste Start dauert rund 1,5 Minuten, danach laufen die Tests in
+wenigen Sekunden.
 
 REST Assured ist als Test-Abhängigkeit in der `pom.xml` eingebunden. Bei `@QuarkusTest` startet
 Quarkus die Applikation auf Port `8081` und richtet REST Assured automatisch auf diesen Port aus;
@@ -432,17 +525,40 @@ Quarkus die Applikation auf Port `8081` und richtet REST Assured automatisch auf
 (`.body(new BlogRequest(...))`) und von REST Assured zu JSON serialisiert. Antworten lassen sich
 typisiert auslesen (`.extract().as(BlogResponse.class)`).
 
-| Testklasse           | Art                           | Prüft                                                                                                  |
-| -------------------- | ----------------------------- | ------------------------------------------------------------------------------------------------------ |
-| `BlogResourceTest`   | `@QuarkusTest` + REST Assured | Alle Endpunkte, DTO-Vertrag (nur freigegebene Felder, keine Mass Assignment), Validierung, Fehler     |
-| `CorsTest`           | `@QuarkusTest` + REST Assured | Preflight von erlaubter Origin, `Location` freigegeben, fremde Origin → `403`                          |
-| `BlogServiceTest`    | `@QuarkusTest`                | Fachlogik: Suche, Sortierung, Update, Löschen, Kommentare                                              |
-| `BlogRepositoryTest` | `@QuarkusTest`                | Panache-Datenzugriff                                                                                   |
-| `BlogMapperTest`     | reiner JUnit-Test             | Mapping Entität ↔ DTO, läuft ohne Quarkus und Datenbank                                                |
+| Testklasse           | Art                                                   | Prüft                                                                                                  |
+| -------------------- | ----------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| `BlogSecurityTest`   | `@QuarkusTest` + REST Assured + `@TestSecurity`       | Die Zugriffsregeln Zeile für Zeile: anonym `401`, `reader`/`author`/`admin` mit erlaubten und verbotenen Aufrufen, Besitzprüfung, Autor im Body wird ignoriert |
+| `KeycloakTokenTest`  | `@QuarkusTest` + REST Assured + echte Keycloak-Tokens | Ende-zu-Ende mit Tokens aus dem Dev-Services-Keycloak: Rollen aus `realm_access.roles`, `sub` als Besitzer, ungültiges Token → `401` |
+| `BlogResourceTest`   | `@QuarkusTest` + REST Assured, als `bob`              | Alle Endpunkte, DTO-Vertrag (nur freigegebene Felder, keine Mass Assignment), Validierung, Fehler     |
+| `BlogServiceTest`    | `@QuarkusTest` + `@TestSecurity`                      | Fachlogik: Suche, Sortierung, Update, Löschen, Kommentare, Autor und Besitzprüfung ohne HTTP          |
+| `CorsTest`           | `@QuarkusTest` + REST Assured                         | Preflight inkl. `Authorization`-Header, `Location` freigegeben, fremde Origin → `403`                  |
+| `BlogRepositoryTest` | `@QuarkusTest`                                        | Panache-Datenzugriff                                                                                   |
+| `BlogMapperTest`     | reiner JUnit-Test                                     | Mapping Entität ↔ DTO (nur der Autor-Name wird herausgegeben), läuft ohne Quarkus und Datenbank       |
 
-> **_HINWEIS:_** Die Datenbank wird über Quarkus Dev Services bereitgestellt – dafür muss Docker
-> laufen. Alternativ eine `quarkus.datasource.jdbc.url` in
-> `src/main/resources/application.properties` setzen.
+### Benutzer simulieren mit `@TestSecurity`
+
+`@TestSecurity` meldet für einen Test einen Benutzer mit Rollen an, ohne dass ein Token geholt
+werden muss. Weil die Besitzprüfung den Claim `sub` verwendet, ergänzt `@OidcSecurity` (aus
+`quarkus-test-security-oidc`) das simulierte Token um diese ID. Die Werte stehen als Konstanten in
+`ch.hftm.security.TestUsers` und entsprechen den IDs im Realm:
+
+```java
+@Test
+@TestSecurity(user = CAROL, roles = {Roles.READER, Roles.AUTHOR})
+@OidcSecurity(claims = @Claim(key = "sub", value = CAROL_ID))
+void authorMayNotChangeSomeoneElsesBlog() {
+    Long id = blogOfBob();
+
+    given().contentType(ContentType.JSON).body(new BlogRequest("Hijacked", "Carol was here"))
+            .when().put("/blogs/{id}", id)
+            .then().statusCode(403)
+            .body("message", is("Only the author may change blog " + id));
+}
+```
+
+Die zwei Ansätze ergänzen sich: `@TestSecurity` prüft jede Regel schnell und gezielt.
+`KeycloakTokenTest` holt mit `KeycloakTestClient` echte Tokens und stellt sicher, dass Realm-Datei,
+Rollen-Claim und `sub` im Zusammenspiel funktionieren.
 
 ---
 

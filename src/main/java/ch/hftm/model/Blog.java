@@ -27,6 +27,12 @@ public class Blog {
     @Column(length = 4000)
     private String content;
 
+    /** Keycloak user id (claim {@code sub}) of the author; decides who may change the blog. */
+    private String authorId;
+
+    /** Login name of the author at the time of writing, for display only. */
+    private String authorName;
+
     @OneToMany(mappedBy = "blog", cascade = CascadeType.ALL, orphanRemoval = true)
     private List<BlogComment> comments = new ArrayList<>();
 
@@ -56,6 +62,19 @@ public class Blog {
 
     public void setContent(String content) {
         this.content = content;
+    }
+
+    public String getAuthorId() {
+        return authorId;
+    }
+
+    public String getAuthorName() {
+        return authorName;
+    }
+
+    public void setAuthor(String authorId, String authorName) {
+        this.authorId = authorId;
+        this.authorName = authorName;
     }
 
     public List<BlogComment> getComments() {

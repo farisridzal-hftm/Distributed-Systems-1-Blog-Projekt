@@ -1,9 +1,18 @@
 package ch.hftm.service;
 
+import ch.hftm.exception.BlogAccessDeniedException;
 import ch.hftm.exception.BlogNotFoundException;
 import ch.hftm.exception.InvalidSortException;
 import ch.hftm.model.Blog;
 import ch.hftm.model.BlogComment;
+import ch.hftm.repository.BlogRepository;
+import ch.hftm.security.Roles;
+import static ch.hftm.security.TestUsers.ADMIN;
+import static ch.hftm.security.TestUsers.ADMIN_ID;
+import static ch.hftm.security.TestUsers.BOB;
+import static ch.hftm.security.TestUsers.BOB_ID;
+import static ch.hftm.security.TestUsers.CAROL;
+import static ch.hftm.security.TestUsers.CAROL_ID;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -11,12 +20,29 @@ import java.util.List;
 import org.junit.jupiter.api.Test;
 import io.quarkus.test.TestTransaction;
 import io.quarkus.test.junit.QuarkusTest;
+import io.quarkus.test.security.TestSecurity;
+import io.quarkus.test.security.oidc.Claim;
+import io.quarkus.test.security.oidc.OidcSecurity;
 import jakarta.inject.Inject;
 
+/** Business logic, called directly. The logged-in user is "bob" unless a test says otherwise. */
 @QuarkusTest
+@TestSecurity(user = BOB, roles = {Roles.READER, Roles.AUTHOR})
+@OidcSecurity(claims = @Claim(key = "sub", value = BOB_ID))
 public class BlogServiceTest {
     @Inject
     BlogService blogService;
+
+    @Inject
+    BlogRepository blogRepository;
+
+    /** Stores a blog written by carol, bypassing the service that would make bob the author. */
+    private Blog blogOfCarol() {
+        Blog blog = new Blog("Carol's Blog", "Written by carol");
+        blog.setAuthor(CAROL_ID, CAROL);
+        blogRepository.persist(blog);
+        return blog;
+    }
 
     @Test
     @TestTransaction
@@ -122,5 +148,70 @@ public class BlogServiceTest {
         // Act & Assert
         var exception = assertThrows(BlogNotFoundException.class, () -> blogService.addCommentToBlog(-1L, "No blog here"));
         assertTrue(exception.getMessage().contains("-1"));
+    }
+
+    @Test
+    @TestTransaction
+    void addingBlogMakesTheCurrentUserItsAuthor() {
+        // Arrange
+        Blog blog = new Blog("Bob's Blog", "Written by bob");
+
+        // Act
+        blogService.addBlog(blog);
+
+        // Assert
+        assertEquals(BOB_ID, blog.getAuthorId());
+        assertEquals(BOB, blog.getAuthorName());
+    }
+
+    @Test
+    @TestTransaction
+    void updatingSomeoneElsesBlogIsDenied() {
+        // Arrange
+        Blog foreign = blogOfCarol();
+
+        // Act & Assert
+        assertThrows(BlogAccessDeniedException.class,
+                () -> blogService.updateBlog(foreign.getId(), new Blog("Hijacked", "Not bob's blog")));
+        assertEquals("Carol's Blog", blogService.getBlog(foreign.getId()).getTitle());
+    }
+
+    @Test
+    @TestTransaction
+    void deletingSomeoneElsesBlogIsDenied() {
+        // Arrange
+        Blog foreign = blogOfCarol();
+
+        // Act & Assert
+        assertThrows(BlogAccessDeniedException.class, () -> blogService.deleteBlog(foreign.getId()));
+    }
+
+    @Test
+    @TestTransaction
+    @TestSecurity(user = ADMIN, roles = {Roles.READER, Roles.ADMIN})
+    @OidcSecurity(claims = @Claim(key = "sub", value = ADMIN_ID))
+    void adminMayDeleteSomeoneElsesBlog() {
+        // Arrange
+        Blog foreign = blogOfCarol();
+
+        // Act
+        blogService.deleteBlog(foreign.getId());
+
+        // Assert
+        assertThrows(BlogNotFoundException.class, () -> blogService.getBlog(foreign.getId()));
+    }
+
+    @Test
+    @TestTransaction
+    void commentGetsTheCurrentUserAsAuthor() {
+        // Arrange
+        Blog blog = blogOfCarol();
+
+        // Act
+        BlogComment comment = blogService.addCommentToBlog(blog.getId(), "Comment by bob");
+
+        // Assert
+        assertEquals(BOB_ID, comment.getAuthorId());
+        assertEquals(BOB, comment.getAuthorName());
     }
 }

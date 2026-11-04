@@ -20,6 +20,12 @@ public class BlogComment {
     @Column(length = 1000)
     private String text;
 
+    /** Keycloak user id (claim {@code sub}) of the author. */
+    private String authorId;
+
+    /** Login name of the author at the time of writing, for display only. */
+    private String authorName;
+
     @ManyToOne(fetch = FetchType.LAZY)
     private Blog blog;
 
@@ -40,6 +46,19 @@ public class BlogComment {
 
     public void setText(String text) {
         this.text = text;
+    }
+
+    public String getAuthorId() {
+        return authorId;
+    }
+
+    public String getAuthorName() {
+        return authorName;
+    }
+
+    public void setAuthor(String authorId, String authorName) {
+        this.authorId = authorId;
+        this.authorName = authorName;
     }
 
     public Blog getBlog() {

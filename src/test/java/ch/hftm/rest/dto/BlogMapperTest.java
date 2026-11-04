@@ -12,24 +12,29 @@ class BlogMapperTest {
     private final BlogMapper mapper = new BlogMapper();
 
     @Test
-    void requestBecomesNewEntityWithoutId() {
+    void requestBecomesNewEntityWithoutIdAndAuthor() {
         Blog blog = mapper.toEntity(new BlogRequest("Title", "Content"));
 
         assertNull(blog.getId());
+        assertNull(blog.getAuthorId());
         assertEquals("Title", blog.getTitle());
         assertEquals("Content", blog.getContent());
     }
 
     @Test
-    void blogIsMappedToResponseWithoutComments() {
+    void blogIsMappedToResponseWithAuthorNameOnly() {
         Blog blog = new Blog("Title", "Content");
+        blog.setAuthor("internal-keycloak-id", "bob");
         blog.addComment(new BlogComment("Not exposed"));
 
-        assertEquals(new BlogResponse(null, "Title", "Content"), mapper.toResponse(blog));
+        assertEquals(new BlogResponse(null, "Title", "Content", "bob"), mapper.toResponse(blog));
     }
 
     @Test
     void commentIsMappedToResponse() {
-        assertEquals(new CommentResponse(null, "Nice"), mapper.toResponse(new BlogComment("Nice")));
+        BlogComment comment = new BlogComment("Nice");
+        comment.setAuthor("internal-keycloak-id", "alice");
+
+        assertEquals(new CommentResponse(null, "Nice", "alice"), mapper.toResponse(comment));
     }
 }

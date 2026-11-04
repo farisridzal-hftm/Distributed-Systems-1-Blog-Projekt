@@ -8,14 +8,26 @@ import static org.hamcrest.Matchers.containsInAnyOrder;
 import static org.hamcrest.Matchers.greaterThanOrEqualTo;
 import static org.hamcrest.Matchers.hasSize;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static ch.hftm.security.TestUsers.BOB;
+import static ch.hftm.security.TestUsers.BOB_ID;
 import ch.hftm.rest.dto.BlogRequest;
 import ch.hftm.rest.dto.BlogResponse;
 import ch.hftm.rest.dto.CommentRequest;
+import ch.hftm.security.Roles;
 import io.quarkus.test.junit.QuarkusTest;
+import io.quarkus.test.security.TestSecurity;
+import io.quarkus.test.security.oidc.Claim;
+import io.quarkus.test.security.oidc.OidcSecurity;
 import io.restassured.http.ContentType;
 import org.junit.jupiter.api.Test;
 
+/**
+ * REST behaviour of the blog endpoints. Every test runs as the author "bob" so that writing
+ * requests pass the security checks; who may do what is covered by {@link BlogSecurityTest}.
+ */
 @QuarkusTest
+@TestSecurity(user = BOB, roles = {Roles.READER, Roles.AUTHOR})
+@OidcSecurity(claims = @Claim(key = "sub", value = BOB_ID))
 class BlogResourceTest {
 
     private Long createBlog(String title, String content) {
@@ -58,7 +70,7 @@ class BlogResourceTest {
                 .statusCode(200)
                 .extract().as(BlogResponse.class);
 
-        assertEquals(new BlogResponse(id, "Created Blog", "Created through REST"), blog);
+        assertEquals(new BlogResponse(id, "Created Blog", "Created through REST", BOB), blog);
     }
 
     @Test
@@ -146,7 +158,7 @@ class BlogResourceTest {
     // --- DTO contract ----------------------------------------------------
 
     @Test
-    void blogResponseExposesOnlyIdTitleAndContent() {
+    void blogResponseExposesOnlyPublicFields() {
         Long id = createBlog("Blog With Hidden Comments", "Comments are not embedded");
         addComment(id, "Not part of the blog response");
 
@@ -154,13 +166,13 @@ class BlogResourceTest {
                 .when().get("/blogs/{id}", id)
                 .then()
                 .statusCode(200)
-                .body("keySet()", containsInAnyOrder("id", "title", "content"));
+                .body("keySet()", containsInAnyOrder("id", "title", "content", "author"));
 
         given()
                 .when().get("/blogs")
                 .then()
                 .statusCode(200)
-                .body("[0].keySet()", containsInAnyOrder("id", "title", "content"));
+                .body("[0].keySet()", containsInAnyOrder("id", "title", "content", "author"));
     }
 
     @Test
@@ -172,7 +184,7 @@ class BlogResourceTest {
                 .when().get("/blogs/{id}/comments", id)
                 .then()
                 .statusCode(200)
-                .body("[0].keySet()", containsInAnyOrder("id", "text"));
+                .body("[0].keySet()", containsInAnyOrder("id", "text", "author"));
     }
 
     @Test

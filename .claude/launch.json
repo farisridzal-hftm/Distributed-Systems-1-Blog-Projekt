@@ -1,0 +1,25 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "blog-dev-services",
+      "runtimeExecutable": "powershell",
+      "runtimeArgs": [
+        "-NoProfile",
+        "-Command",
+        "Set-Location -LiteralPath 'C:\\Users\\faris\\OneDrive - HFTM\\Schwerpunkt\\IN350_Distributed Systems 1\\ds1\\Distributed-Systems-1-Blog-Projekt'; .\\mvnw.cmd quarkus:dev '-Dquarkus.console.enabled=false'"
+      ],
+      "port": 8080
+    },
+    {
+      "name": "blog-external-keycloak",
+      "runtimeExecutable": "powershell",
+      "runtimeArgs": [
+        "-NoProfile",
+        "-Command",
+        "Set-Location -LiteralPath 'C:\\Users\\faris\\OneDrive - HFTM\\Schwerpunkt\\IN350_Distributed Systems 1\\ds1\\Distributed-Systems-1-Blog-Projekt'; .\\mvnw.cmd quarkus:dev '-Dquarkus.profile=external-keycloak' '-Dquarkus.console.enabled=false'"
+      ],
+      "port": 8080
+    }
+  ]
+}

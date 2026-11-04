@@ -1,11 +1,13 @@
 package ch.hftm.service;
 
+import ch.hftm.exception.BlogAccessDeniedException;
 import ch.hftm.exception.BlogNotFoundException;
 import ch.hftm.exception.InvalidSortException;
 import ch.hftm.model.Blog;
 import ch.hftm.model.BlogComment;
 import ch.hftm.repository.BlogCommentRepository;
 import ch.hftm.repository.BlogRepository;
+import ch.hftm.security.CurrentUser;
 import java.util.List;
 import java.util.Set;
 import io.quarkus.logging.Log;
@@ -24,6 +26,9 @@ public class BlogService {
 
     @Inject
     BlogCommentRepository blogCommentRepository;
+
+    @Inject
+    CurrentUser currentUser;
 
     public List<Blog> getBlogs() {
         return getBlogs(null, "id", "asc");
@@ -53,27 +58,38 @@ public class BlogService {
                 .orElseThrow(() -> new BlogNotFoundException(blogId));
     }
 
+    /** The logged-in user becomes the author; the request body cannot choose one. */
     @Transactional
     public void addBlog(Blog blog) {
-        Log.info("Adding blog " + blog.getTitle());
+        blog.setAuthor(currentUser.id(), currentUser.name());
+
+        Log.info("Adding blog " + blog.getTitle() + " by " + currentUser.name());
         blogRepository.persist(blog);
     }
 
+    /** Only the author may change a blog, not even an admin may rewrite someone else's text. */
     @Transactional
     public Blog updateBlog(Long blogId, Blog updated) {
         var blog = getBlog(blogId);
+        if (!currentUser.isAuthorOf(blog)) {
+            throw new BlogAccessDeniedException("Only the author may change blog " + blogId);
+        }
 
-        Log.info("Updating blog " + blogId);
+        Log.info("Updating blog " + blogId + " by " + currentUser.name());
         blog.setTitle(updated.getTitle());
         blog.setContent(updated.getContent());
         return blog;
     }
 
+    /** The author may delete their own blog, an admin may delete any blog (moderation). */
     @Transactional
     public void deleteBlog(Long blogId) {
         var blog = getBlog(blogId);
+        if (!currentUser.isAuthorOf(blog) && !currentUser.isAdmin()) {
+            throw new BlogAccessDeniedException("Only the author or an admin may delete blog " + blogId);
+        }
 
-        Log.info("Deleting blog " + blogId);
+        Log.info("Deleting blog " + blogId + " by " + currentUser.name());
         blogRepository.delete(blog);
     }
 
@@ -81,8 +97,9 @@ public class BlogService {
     public BlogComment addCommentToBlog(Long blogId, String text) {
         var blog = getBlog(blogId);
 
-        Log.info("Adding comment to blog " + blog.getTitle());
+        Log.info("Adding comment to blog " + blog.getTitle() + " by " + currentUser.name());
         var comment = new BlogComment(text);
+        comment.setAuthor(currentUser.id(), currentUser.name());
         blog.addComment(comment);
         blogCommentRepository.persist(comment);
         return comment;
