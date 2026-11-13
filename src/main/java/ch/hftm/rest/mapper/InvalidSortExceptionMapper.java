@@ -12,7 +12,7 @@ public class InvalidSortExceptionMapper implements ExceptionMapper<InvalidSortEx
 
     @Override
     public Response toResponse(InvalidSortException exception) {
-        Log.info("Responding 400: " + exception.getMessage());
+        Log.debugf("Responding 400: %s", exception.getMessage());
 
         return Response.status(Response.Status.BAD_REQUEST)
                 .entity(new ErrorResponse(400, "Bad Request", exception.getMessage()))

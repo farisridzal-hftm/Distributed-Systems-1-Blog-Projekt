@@ -49,7 +49,7 @@ public class BlogService {
             blogs = blogRepository.list("lower(title) like ?1 or lower(content) like ?1", sorting, pattern);
         }
 
-        Log.info("Returning " + blogs.size() + " blogs (search=" + search + ", sort=" + sort + ", order=" + order + ")");
+        Log.debugf("Listing %d blogs (search=%s, sort=%s, order=%s)", blogs.size(), search, sort, order);
         return blogs;
     }
 
@@ -62,9 +62,9 @@ public class BlogService {
     @Transactional
     public void addBlog(Blog blog) {
         blog.setAuthor(currentUser.id(), currentUser.name());
-
-        Log.info("Adding blog " + blog.getTitle() + " by " + currentUser.name());
         blogRepository.persist(blog);
+
+        Log.infof("Blog %d created by %s", blog.getId(), currentUser.name());
     }
 
     /** Only the author may change a blog, not even an admin may rewrite someone else's text. */
@@ -75,9 +75,10 @@ public class BlogService {
             throw new BlogAccessDeniedException("Only the author may change blog " + blogId);
         }
 
-        Log.info("Updating blog " + blogId + " by " + currentUser.name());
         blog.setTitle(updated.getTitle());
         blog.setContent(updated.getContent());
+
+        Log.infof("Blog %d updated by %s", blogId, currentUser.name());
         return blog;
     }
 
@@ -89,19 +90,23 @@ public class BlogService {
             throw new BlogAccessDeniedException("Only the author or an admin may delete blog " + blogId);
         }
 
-        Log.info("Deleting blog " + blogId + " by " + currentUser.name());
+        // Deleting someone else's blog is moderation; the log says so for later traceability.
+        String role = currentUser.isAuthorOf(blog) ? "author" : "admin";
         blogRepository.delete(blog);
+
+        Log.infof("Blog %d deleted by %s (as %s)", blogId, currentUser.name(), role);
     }
 
     @Transactional
     public BlogComment addCommentToBlog(Long blogId, String text) {
         var blog = getBlog(blogId);
 
-        Log.info("Adding comment to blog " + blog.getTitle() + " by " + currentUser.name());
         var comment = new BlogComment(text);
         comment.setAuthor(currentUser.id(), currentUser.name());
         blog.addComment(comment);
         blogCommentRepository.persist(comment);
+
+        Log.infof("Comment %d added to blog %d by %s", comment.getId(), blogId, currentUser.name());
         return comment;
     }
 
@@ -110,7 +115,7 @@ public class BlogService {
         getBlog(blogId);
 
         var comments = blogCommentRepository.list("blog.id", blogId);
-        Log.info("Returning " + comments.size() + " comments for blog " + blogId);
+        Log.debugf("Listing %d comments of blog %d", comments.size(), blogId);
         return comments;
     }
 

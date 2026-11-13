@@ -24,7 +24,7 @@ public class ValidationExceptionMapper implements ExceptionMapper<ConstraintViol
                 .map(violation -> new Violation(fieldName(violation), violation.getMessage()))
                 .toList();
 
-        Log.info("Responding 400: " + violations.size() + " constraint violation(s)");
+        Log.debugf("Responding 400: invalid fields %s", violations.stream().map(Violation::getField).toList());
 
         return Response.status(Response.Status.BAD_REQUEST)
                 .entity(new ErrorResponse(400, "Bad Request", "Request validation failed", violations))

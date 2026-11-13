@@ -1,5 +1,6 @@
 package ch.hftm;
 
+import ch.hftm.config.BlogConfig;
 import ch.hftm.model.Blog;
 import ch.hftm.repository.BlogRepository;
 import io.quarkus.logging.Log;
@@ -20,14 +21,25 @@ public class DataInitialization {
     @Inject
     BlogRepository blogRepository;
 
+    @Inject
+    BlogConfig config;
+
     @Transactional
     public void init(@Observes StartupEvent event) {
-        if (blogRepository.count() == 0) {
-            Log.info("Initializing blog test data");
-
-            blogRepository.persist(seedBlog("First Blog", "This is my first blog"));
-            blogRepository.persist(seedBlog("Second Blog", "This is my second blog"));
+        if (!config.seedData().enabled()) {
+            Log.info("Seed data is disabled (blog.seed-data.enabled=false)");
+            return;
         }
+
+        long existing = blogRepository.count();
+        if (existing > 0) {
+            Log.infof("Seed data skipped, the database already contains %d blogs", existing);
+            return;
+        }
+
+        blogRepository.persist(seedBlog("First Blog", "This is my first blog"));
+        blogRepository.persist(seedBlog("Second Blog", "This is my second blog"));
+        Log.infof("Created 2 seed blogs owned by %s", SEED_AUTHOR_NAME);
     }
 
     private Blog seedBlog(String title, String content) {

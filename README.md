@@ -1,6 +1,25 @@
 # ds1 – Blog REST API
 
-Quarkus-Applikation mit einem Blog-System (Blogs und Kommentare, 1:n) und einer REST-Schnittstelle.
+Quarkus-Applikation mit einem Blog-System (Blogs und Kommentare, 1:n) und einer REST-Schnittstelle,
+abgesichert mit Keycloak und als Container-Image auf GitHub Packages veröffentlicht.
+
+## Schnellstart: veröffentlichtes Image ausprobieren
+
+Voraussetzungen: Docker und [HTTPie](https://httpie.io/cli). Die Ports `8080` (API) und `8180`
+(Keycloak) müssen frei sein.
+
+```shell script
+git clone https://github.com/farisridzal-hftm/Distributed-Systems-1-Blog-Projekt.git
+cd Distributed-Systems-1-Blog-Projekt
+cp .env.example .env
+docker compose -f docker-compose.app.yml up -d
+```
+
+Das startet das Backend-Image `ghcr.io/farisridzal-hftm/blog-backend`, Keycloak mit Realm und
+Test-Benutzern sowie MySQL. Nach etwa einer Minute meldet `http :8080/q/health/ready` den Status
+`UP`. Beispielaufrufe mit Token stehen unter
+[Container-Image und Betrieb](#container-image-und-betrieb), das Swagger UI läuft unter
+<http://localhost:8080/q/swagger-ui>.
 
 ## REST-Design
 
@@ -164,6 +183,19 @@ laufen über den `ForbiddenExceptionMapper`:
 { "status": 403, "error": "Forbidden", "message": "Only the author may change blog 1" }
 ```
 
+Body ist kein gültiges JSON (`400 Bad Request`, `InvalidJsonExceptionMapper`):
+
+```json
+{ "status": 400, "error": "Bad Request", "message": "Request body is not valid JSON" }
+```
+
+Unerwarteter Fehler (`500 Internal Server Error`, `UnexpectedExceptionMapper`). Der Stacktrace steht
+nur im Log, der Client erfährt keine Interna:
+
+```json
+{ "status": 500, "error": "Internal Server Error", "message": "An unexpected error occurred" }
+```
+
 ### Beispiele
 
 Schreibende Aufrufe brauchen ein Token. Wie man es holt, steht unter
@@ -198,6 +230,8 @@ http POST :8080/blogs/1/comments "Authorization:Bearer $token" text="Schöner Be
 | Repository | `ch.hftm.repository`  | Panache-Datenzugriff                          |
 | Model      | `ch.hftm.model`       | JPA-Entitäten inkl. Validierungsregeln        |
 | Exceptions | `ch.hftm.exception`   | Fachliche Fehler (`BlogNotFoundException`, …) |
+| Config     | `ch.hftm.config`      | Eigene Properties (`BlogConfig`, Präfix `blog`) |
+| Start      | `ch.hftm`             | `ApplicationLifecycle` (Start/Stopp-Log), `DataInitialization` (Startdaten) |
 
 ### Vorerst ausgeklammert
 
@@ -248,7 +282,7 @@ Einschätzung, welche Risiken für diese Blog-API relevant sind und wie weit sie
 | **API5** Broken Function Level Authorization            | hoch             | abgedeckt          | Jeder Endpunkt hat `@PermitAll` oder `@RolesAllowed`; mit `deny-unannotated-endpoints=true` ist ein Endpunkt ohne Annotation gesperrt. Fremde Blogs löschen darf nur `admin`. |
 | **API6** Unrestricted Access to Sensitive Business Flows | mittel          | teilweise abgedeckt | Kommentieren ist genau das Beispiel aus der OWASP-Beschreibung. Es braucht jetzt ein Login, und jeder Kommentar ist einem Konto zugeordnet. Offen: Rate Limiting; ein angemeldeter Bot könnte weiterhin beliebig viele Kommentare posten. |
 | **API7** Server Side Request Forgery                    | nicht relevant   | –                  | Die API ruft keine URLs auf, die von einem Client stammen.                                                                                                                                                                                                  |
-| **API8** Security Misconfiguration                      | mittel           | teilweise abgedeckt | CORS mit expliziten Origins statt `*`; die eigenen Fehler-Responses enthalten keine Stacktraces oder Klassennamen; die Dev UI läuft nur im Dev-Modus. Offen: HTTPS, Security-Header und die produktive CORS-Origin.                                       |
+| **API8** Security Misconfiguration                      | mittel           | teilweise abgedeckt | CORS mit expliziten Origins statt `*`; auch unerwartete Fehler liefern nur ein `500` ohne Stacktrace (`UnexpectedExceptionMapper`); Secrets kommen aus `.env` und das Image startet nicht ohne DB-Passwort; die Dev UI läuft nur im Dev-Modus. Bewusst offen: Das Swagger UI ist im Image enthalten, damit sich die API testen lässt. Offen: HTTPS, Security-Header und die produktive CORS-Origin. |
 | **API9** Improper Inventory Management                  | niedrig          | teilweise abgedeckt | Alle Endpunkte sind in dieser README dokumentiert, die OpenAPI-Beschreibung (`/q/openapi`) wird aus dem Code erzeugt und zeigt pro Operation die nötigen Rollen. Offen: keine Versionierung (z. B. `/v1/blogs`), und der Demo-Endpunkt `/hello` ist noch aktiv. |
 | **API10** Unsafe Consumption of APIs                    | nicht relevant   | –                  | Es werden keine Drittanbieter-APIs angebunden.                                                                                                                                                                                                              |
 
@@ -509,6 +543,232 @@ importiert den Realm wieder frisch aus der JSON-Datei. Dauerhafte Änderungen ge
   stattdessen den Authorization Code Flow mit PKCE.
 - **Test-Benutzer** mit festen IDs, damit `sub` bei jedem Import gleich bleibt.
 
+## Container-Image und Betrieb
+
+Das Backend ist als Container-Image auf GitHub Packages (GHCR) veröffentlicht:
+
+| Was        | Wert                                                                                                   |
+| ---------- | ------------------------------------------------------------------------------------------------------ |
+| Image      | `ghcr.io/farisridzal-hftm/blog-backend`                                                                |
+| Tags       | `0.1` (Version aus der `pom.xml`) und `latest`                                                         |
+| Basis      | `registry.access.redhat.com/ubi9/openjdk-25-runtime` (aus `src/main/docker/Dockerfile.jvm`)            |
+| Paketseite | <https://github.com/users/farisridzal-hftm/packages/container/package/blog-backend>                    |
+| Sichtbarkeit | Public – das Image lässt sich ohne Login ziehen                                                      |
+
+### Gesamtsystem starten
+
+Das Image allein reicht nicht: Es braucht eine MySQL-Datenbank und Keycloak.
+`docker-compose.app.yml` startet alle drei Container. Keycloak kommt per `include` aus
+`docker-compose.yml`, mit derselben Realm-Datei wie in der Entwicklung.
+
+```text
+HTTPie / Browser ──1. Token holen──────────▶ blog-keycloak  localhost:8180  (Realm "blog", Test-Benutzer)
+       │
+       └─────────2. Aufruf mit Bearer-Token──▶ blog-backend   localhost:8080  (Image von GHCR)
+                                                   ├──▶ blog-mysql   mysql:3306     (Daten im Volume blog-mysql-data)
+                                                   └──▶ blog-keycloak keycloak:8080 (Signaturschlüssel)
+```
+
+```shell script
+cp .env.example .env                                # PowerShell: Copy-Item .env.example .env
+docker compose -f docker-compose.app.yml up -d
+docker compose -f docker-compose.app.yml ps         # alle drei "Up", MySQL und Keycloak "healthy"
+http :8080/q/health/ready                           # "status": "UP" mit Datenbank-Check
+```
+
+- **Startreihenfolge:** Das Backend wartet per Healthcheck, bis MySQL und Keycloak bereit sind.
+  Der erste Start dauert etwa eine Minute, Quarkus selbst startet in rund 4 Sekunden.
+- **Datenbank:** MySQL 9.5, nur im Docker-Netz erreichbar. Hibernate legt fehlende Tabellen beim
+  Start an (`schema-management.strategy=update`), bestehende Daten bleiben erhalten. Ist die
+  Datenbank leer, legt die App zwei Beispiel-Blogs von `bob` an.
+- **Keycloak:** importiert beim ersten Start `keycloak/blog-realm.json`, ohne manuelle
+  Konfiguration. Test-Benutzer und Rollen siehe [Test-Benutzer](#test-benutzer).
+- **Logs:** `docker compose -f docker-compose.app.yml logs -f blog-backend`
+- **Stoppen:** `docker compose -f docker-compose.app.yml down` behält die Daten im Volume,
+  `down -v` löscht auch die Datenbank.
+
+### Secrets in `.env`
+
+Passwörter stehen nicht im Repository. `docker compose` liest sie aus `.env`, die in der
+`.gitignore` steht; `.env.example` ist die Vorlage:
+
+| Variable                  | Pflicht | Bedeutung                                                    |
+| ------------------------- | ------- | ------------------------------------------------------------ |
+| `DB_PASSWORD`             | ja      | Passwort des DB-Benutzers `blog` (MySQL und Backend)         |
+| `DB_ROOT_PASSWORD`        | ja      | Passwort des MySQL-Benutzers `root`                          |
+| `KEYCLOAK_ADMIN_PASSWORD` | nein    | Admin-Konsole `kcadmin`, Standard `kcadmin`                  |
+| `BACKEND_IMAGE`           | nein    | anderes Image oder anderer Tag, Standard `…/blog-backend:latest` |
+
+Fehlt ein Pflichtwert, bricht `docker compose` mit einer Meldung ab, statt mit einem leeren
+Passwort zu starten. Auch die App selbst hat für `DB_PASSWORD` keinen Standardwert.
+
+### Konfiguration des Images
+
+Alles, was sich zwischen Umgebungen unterscheidet, kommt aus Umgebungsvariablen (Profil `prod`
+in `application.properties`):
+
+| Variable                 | Standard                            | Bedeutung                                                         |
+| ------------------------ | ----------------------------------- | ----------------------------------------------------------------- |
+| `DB_URL`                 | `jdbc:mysql://localhost:3306/blog`  | JDBC-URL der Datenbank                                            |
+| `DB_USER`                | `blog`                              | Datenbank-Benutzer                                                |
+| `DB_PASSWORD`            | – (Pflicht)                         | Datenbank-Passwort; ohne startet die App nicht                    |
+| `OIDC_SERVER_URL`        | `http://localhost:8180/realms/blog` | Wo das Backend Keycloak erreicht, um die Signaturschlüssel zu holen |
+| `OIDC_ISSUER`            | wie `OIDC_SERVER_URL`               | Welcher Aussteller (`iss`) in den Tokens stehen muss              |
+| `BLOG_SEED_DATA_ENABLED` | `true`                              | Eigene Property `blog.seed-data.enabled`: Beispiel-Blogs anlegen  |
+
+Jede andere Quarkus-Property lässt sich ebenso setzen, zum Beispiel
+`QUARKUS_LOG_CATEGORY__CH_HFTM__LEVEL=DEBUG` für ausführliche Logs.
+
+**Warum `OIDC_SERVER_URL` und `OIDC_ISSUER` getrennt sind:** Im Docker-Netz erreicht das Backend
+Keycloak unter `http://keycloak:8080`. HTTPie und Browser holen ihre Tokens aber über
+`http://localhost:8180`, und genau diese Adresse steht als Aussteller im Token. Ohne
+`OIDC_ISSUER=http://localhost:8180/realms/blog` lehnt das Backend gültige Tokens mit `401` ab
+(ausprobiert); mit der Einstellung prüft es Signatur und Aussteller korrekt.
+
+Ohne Compose, zum Beispiel neben bestehender Infrastruktur, sieht ein Start so aus:
+
+```shell script
+docker run -d -p 8080:8080 -e DB_URL=jdbc:mysql://<db-host>:3306/blog -e DB_PASSWORD=<passwort> -e OIDC_SERVER_URL=http://<keycloak-host>/realms/blog ghcr.io/farisridzal-hftm/blog-backend:latest
+```
+
+### Beispielaufrufe gegen das Image (mit Token via HTTPie)
+
+Die Tokens kommen vom Keycloak auf Port `8180`. Die Funktion `Get-Token` stammt aus
+[Token mit HTTPie holen](#token-mit-httpie-holen):
+
+```powershell
+$bob = Get-Token bob 8180; $carol = Get-Token carol 8180; $alice = Get-Token alice 8180; $admin = Get-Token admin 8180
+
+http :8080/blogs                                                                       # 200 öffentlich, Startblogs von bob
+http POST :8080/blogs title="Test" content="Ohne Token"                                # 401 kein Token
+http POST :8080/blogs "Authorization:Bearer $alice" title="Test" content="X"           # 403 Rolle author fehlt
+http POST :8080/blogs "Authorization:Bearer $bob" title="Aus dem Container" content="X" # 201 "author": "bob"
+http PUT :8080/blogs/1 "Authorization:Bearer $bob" title="Neu" content="X"             # 200 eigenes Blog
+http PUT :8080/blogs/1 "Authorization:Bearer $carol" title="Neu" content="X"           # 403 fremdes Blog
+http POST :8080/blogs/1/comments "Authorization:Bearer $alice" text="Hallo"            # 201 Kommentar von alice
+http DELETE :8080/blogs/2 "Authorization:Bearer $admin"                                # 204 Moderation
+```
+
+Bash mit [`jq`](https://jqlang.org/), hier mit HTTPies eigener Bearer-Option `-A bearer` statt
+eines selbst gesetzten Headers:
+
+```shell script
+TOKEN=$(http --form POST :8180/realms/blog/protocol/openid-connect/token grant_type=password client_id=blog-client username=bob password=bob | jq -r .access_token)
+http -A bearer -a "$TOKEN" POST :8080/blogs title="Aus dem Container" content="Mit Token vom Host"
+```
+
+Die Kommentare zeigen das Ergebnis, mit dem die Aufrufe gegen das gebaute Image durchgelaufen
+sind. Das Swagger UI ist auch im Image enthalten: <http://localhost:8080/q/swagger-ui>, Token
+über **Authorize** einfügen (siehe [Mit dem Swagger UI testen](#mit-dem-swagger-ui-testen)).
+
+### Image bauen und veröffentlichen
+
+Gebaut wird mit der Extension `quarkus-container-image-docker` aus `src/main/docker/Dockerfile.jvm`.
+Registry, Name, Tags und das Label, das das Paket mit diesem Repository verknüpft, stehen in
+`application.properties`:
+
+```shell script
+./mvnw package -Dquarkus.container-image.build=true
+```
+
+Das ergibt `ghcr.io/farisridzal-hftm/blog-backend:0.1` und `:latest`. Zum Veröffentlichen
+braucht Docker einmalig ein Login bei GHCR mit einem Token, das Pakete schreiben darf:
+
+```shell script
+gh auth refresh -h github.com -s write:packages
+gh auth token | docker login ghcr.io -u farisridzal-hftm --password-stdin
+docker push ghcr.io/farisridzal-hftm/blog-backend:0.1
+docker push ghcr.io/farisridzal-hftm/blog-backend:latest
+```
+
+Bauen und Pushen geht auch in einem Schritt mit `-Dquarkus.container-image.push=true`.
+
+Neue Pakete sind auf GHCR zuerst privat. Öffentlich wird das Image auf GitHub unter
+*Packages → blog-backend → Package settings → Danger Zone → Change visibility → Public*.
+Alternativ lässt sich dort unter *Manage access* einem einzelnen Benutzer Lesezugriff geben.
+
+### Vertiefung: natives Image im Vergleich
+
+Dasselbe Backend lässt sich mit GraalVM (Mandrel) zu einem nativen Programm kompilieren. Eine
+lokale GraalVM ist nicht nötig, gebaut wird in einem Builder-Container:
+
+```shell script
+./mvnw package -Dnative -DskipTests -Dquarkus.native.container-build=true -Dquarkus.container-image.build=true -Dquarkus.container-image.tag=0.1-native -Dquarkus.container-image.additional-tags=latest-native
+```
+
+Die eigenen Tags verhindern, dass das native Image `latest` (JVM) überschreibt. Als Basis dient
+`src/main/docker/Dockerfile.native` (`ubi9/ubi-minimal`). Der Build dauerte rund 8 Minuten und
+brauchte bis zu 5 GB Arbeitsspeicher, Docker sollte also mindestens 6 GB zur Verfügung haben.
+
+Gemessen auf demselben Laptop, je zweimal, beide Images mit identischer Konfiguration gegen
+dieselbe MySQL und denselben Keycloak:
+
+| Messgrösse                              | JVM (`0.1`)    | Nativ (`0.1-native`) |
+| --------------------------------------- | -------------- | -------------------- |
+| Image-Grösse                            | 730 MB         | 304 MB               |
+| Startzeit laut Quarkus                  | 4,1 – 4,2 s    | 0,12 s               |
+| `docker run` bis Health `UP`            | 5,4 – 5,5 s    | 1,0 – 1,1 s          |
+| Arbeitsspeicher nach dem Start          | 233 – 244 MiB  | 23 MiB               |
+| Arbeitsspeicher nach 200 Requests       | 241 – 252 MiB  | 41 – 43 MiB          |
+
+Fachlich verhält sich das native Image gleich: Token-Prüfung, Besitzprüfung (`403`), Fehler
+(`400` bei kaputtem JSON) und Logging funktionieren unverändert. Im Gesamtsystem lässt es sich
+mit `BACKEND_IMAGE=ghcr.io/farisridzal-hftm/blog-backend:0.1-native` in der `.env` verwenden,
+sofern es ebenfalls gepusht wurde.
+
+Abwägung: Das native Image startet rund 35-mal schneller und braucht etwa ein Zehntel des
+Speichers. Das lohnt sich, wenn viele Instanzen laufen oder Instanzen oft neu starten (Skalieren
+auf null, Serverless). Dafür ist der Build langsam und speicherhungrig, und Bibliotheken mit viel
+Reflection brauchen manchmal zusätzliche Konfiguration. Für die Entwicklung und die Tests bleibt
+deshalb das JVM-Image der Standard. Nicht gemessen wurde der Durchsatz unter Dauerlast, bei dem
+die JVM dank JIT aufholen kann.
+
+## Logging
+
+Alle Klassen loggen über die statische Fassade `io.quarkus.logging.Log`. Ein Logger-Feld ist
+nicht nötig, Quarkus setzt beim Build die Kategorie der aufrufenden Klasse ein. Parameter werden
+mit `Log.infof("Blog %d created by %s", id, user)` übergeben statt per String-Verkettung.
+
+| Stufe   | Wofür                                                                     | Wo                                                                            |
+| ------- | ------------------------------------------------------------------------- | ----------------------------------------------------------------------------- |
+| `ERROR` | Unerwartete Fehler mit Stacktrace; der Client bekommt nur ein `500`        | `UnexpectedExceptionMapper`                                                   |
+| `WARN`  | Verweigerter Zugriff eines angemeldeten Benutzers – möglicher Missbrauch  | `ForbiddenExceptionMapper`                                                    |
+| `INFO`  | Systemzustände (Start mit Profil/Datenbank/Keycloak, Startdaten, Stopp) und Geschäftsereignisse (Blog angelegt, geändert, gelöscht, Kommentar), immer mit Benutzer | `ApplicationLifecycle`, `DataInitialization`, `BlogService` |
+| `DEBUG` | Details für die Fehlersuche: Lesezugriffe, abgelehnte Eingaben (`400`, `404`) | `BlogService`, übrige Exception-Mapper                                     |
+
+Dazu schreibt Quarkus pro HTTP-Request eine Zeile ins Access-Log (Methode, Pfad, Status, Grösse,
+Dauer). Damit ist auch ein `401` sichtbar, das Quarkus beantwortet, bevor der eigene Code läuft.
+
+Log des Images bei den Beispielaufrufen oben (Zeitstempel und Thread gekürzt, Health-Checks weggelassen):
+
+```text
+INFO  [ch.hftm.ApplicationLifecycle] Blog API started: profiles=[prod], database=jdbc:mysql://mysql:3306/blog, keycloak=http://keycloak:8080/realms/blog
+INFO  [ch.hftm.DataInitialization] Created 2 seed blogs owned by bob
+INFO  [io.quarkus.http.access-log] 172.21.0.1 "GET /blogs HTTP/1.1" 200 161 bytes 103 ms
+INFO  [io.quarkus.http.access-log] 172.21.0.1 "POST /blogs HTTP/1.1" 401 - bytes 22 ms
+WARN  [ch.hftm.rest.mapper.ForbiddenExceptionMapper] Access denied for alice on /blogs: Missing required role
+INFO  [io.quarkus.http.access-log] 172.21.0.1 "POST /blogs HTTP/1.1" 403 68 bytes 49 ms
+INFO  [ch.hftm.service.BlogService] Blog 3 created by bob
+INFO  [io.quarkus.http.access-log] 172.21.0.1 "POST /blogs HTTP/1.1" 201 65 bytes 54 ms
+INFO  [ch.hftm.service.BlogService] Blog 1 updated by bob
+INFO  [io.quarkus.http.access-log] 172.21.0.1 "PUT /blogs/1 HTTP/1.1" 200 51 bytes 37 ms
+WARN  [ch.hftm.rest.mapper.ForbiddenExceptionMapper] Access denied for carol on /blogs/1: Only the author may change blog 1
+INFO  [io.quarkus.http.access-log] 172.21.0.1 "PUT /blogs/1 HTTP/1.1" 403 80 bytes 21 ms
+INFO  [ch.hftm.service.BlogService] Comment 1 added to blog 1 by alice
+INFO  [io.quarkus.http.access-log] 172.21.0.1 "POST /blogs/1/comments HTTP/1.1" 201 40 bytes 60 ms
+INFO  [ch.hftm.service.BlogService] Blog 2 deleted by admin (as admin)
+INFO  [io.quarkus.http.access-log] 172.21.0.1 "DELETE /blogs/2 HTTP/1.1" 204 - bytes 38 ms
+```
+
+- **Konfiguration:** `ch.hftm` loggt standardmässig ab `INFO`, im Dev-Modus ab `DEBUG`. Im
+  Container lässt sich das mit `QUARKUS_LOG_CATEGORY__CH_HFTM__LEVEL=DEBUG` ändern, ohne das Image
+  neu zu bauen.
+- **Nachvollziehbarkeit:** Löscht ein `admin` ein fremdes Blog, steht `(as admin)` im Log. So ist
+  Moderation von normalem Löschen unterscheidbar.
+- **Was nie geloggt wird:** Tokens, Passwörter sowie Inhalte von Blogs und Kommentaren. Das
+  Access-Log enthält keine Header, also auch kein `Authorization`. Geloggt werden nur IDs und
+  Login-Namen.
+
 ## Tests
 
 ```shell script
@@ -534,6 +794,8 @@ typisiert auslesen (`.extract().as(BlogResponse.class)`).
 | `CorsTest`           | `@QuarkusTest` + REST Assured                         | Preflight inkl. `Authorization`-Header, `Location` freigegeben, fremde Origin → `403`                  |
 | `BlogRepositoryTest` | `@QuarkusTest`                                        | Panache-Datenzugriff                                                                                   |
 | `BlogMapperTest`     | reiner JUnit-Test                                     | Mapping Entität ↔ DTO (nur der Autor-Name wird herausgegeben), läuft ohne Quarkus und Datenbank       |
+| `ErrorHandlingTest`  | `@QuarkusTest` + REST Assured                         | Der Catch-all-Mapper lässt `404`, `405` und `400` (kaputtes JSON) unverändert, Health-Check `UP`       |
+| `BlogApiIT`, `GreetingResourceIT` | `@QuarkusIntegrationTest`                | Blackbox-Tests gegen das gebaute Container-Image, siehe unten                                         |
 
 ### Benutzer simulieren mit `@TestSecurity`
 
@@ -559,6 +821,22 @@ void authorMayNotChangeSomeoneElsesBlog() {
 Die zwei Ansätze ergänzen sich: `@TestSecurity` prüft jede Regel schnell und gezielt.
 `KeycloakTokenTest` holt mit `KeycloakTestClient` echte Tokens und stellt sicher, dass Realm-Datei,
 Rollen-Claim und `sub` im Zusammenspiel funktionieren.
+
+### Blackbox-Tests gegen das Container-Image
+
+```shell script
+./mvnw verify -DskipITs=false -Dquarkus.container-image.build=true
+```
+
+Maven baut zuerst das Image, dann startet `@QuarkusIntegrationTest` es per `docker run` neben den
+Dev Services (MySQL, Keycloak). Die Tests sprechen nur HTTP mit dem Container und haben keinen
+Zugriff auf Beans oder die Datenbank. `BlogApiIT` prüft: Start mit Health `UP`, öffentliches Lesen
+inklusive Startdaten, `401` ohne Token, und dass die OpenAPI-Beschreibung die geschützten
+Operationen markiert.
+
+Damit die Dev Services greifen, startet Quarkus das Image dabei mit dem Profil `test`
+(`quarkus.test.integration-test-profile=test`); das `prod`-Profil würde echte Server erwarten. Ohne
+`-DskipITs=false` werden die Integrationstests übersprungen, `./mvnw test` bleibt also schnell.
 
 ---
 

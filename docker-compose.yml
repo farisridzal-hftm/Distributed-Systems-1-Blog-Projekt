@@ -1,4 +1,9 @@
-# Local Keycloak for the blog API - development only.
+# Local Keycloak for the blog API.
+#
+#   docker compose up -d                              Keycloak only, for
+#                                                     ./mvnw quarkus:dev -Dquarkus.profile=external-keycloak
+#   docker compose -f docker-compose.app.yml up -d    Keycloak + MySQL + the published backend image
+#
 # Imports keycloak/blog-realm.json (realm "blog" with roles, client and test users) on first start.
 services:
   keycloak:
@@ -6,11 +11,18 @@ services:
     container_name: blog-keycloak
     command: start-dev --import-realm
     environment:
-      # Admin console login (realm "master"), not a blog user.
+      # Admin console login (realm "master"), not a blog user. The password can be set in .env.
       KC_BOOTSTRAP_ADMIN_USERNAME: kcadmin
-      KC_BOOTSTRAP_ADMIN_PASSWORD: kcadmin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:-kcadmin}
+      KC_HEALTH_ENABLED: "true"
     ports:
       # 8080 is taken by Quarkus, so Keycloak is published on 8180.
       - "8180:8080"
     volumes:
       - ./keycloak:/opt/keycloak/data/import:ro
+    healthcheck:
+      # The image has no curl, so bash asks the management port directly.
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/localhost/9000 && printf 'GET /health/ready HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n' >&3 && grep -q UP <&3"]
+      interval: 5s
+      timeout: 5s
+      retries: 30

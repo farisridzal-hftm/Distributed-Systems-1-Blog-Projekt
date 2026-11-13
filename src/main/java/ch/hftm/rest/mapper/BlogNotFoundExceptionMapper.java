@@ -12,7 +12,7 @@ public class BlogNotFoundExceptionMapper implements ExceptionMapper<BlogNotFound
 
     @Override
     public Response toResponse(BlogNotFoundException exception) {
-        Log.info("Responding 404: " + exception.getMessage());
+        Log.debugf("Responding 404: %s", exception.getMessage());
 
         return Response.status(Response.Status.NOT_FOUND)
                 .entity(new ErrorResponse(404, "Not Found", exception.getMessage()))
