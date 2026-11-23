@@ -1,8 +1,10 @@
 package ch.hftm.model;
 
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 
+import org.hibernate.annotations.CreationTimestamp;
 import jakarta.persistence.CascadeType;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
@@ -32,6 +34,11 @@ public class Blog {
 
     /** Login name of the author at the time of writing, for display only. */
     private String authorName;
+
+    /** Set by Hibernate when the blog is first stored; column added by migration V2. */
+    @CreationTimestamp
+    @Column(nullable = false, updatable = false)
+    private Instant createdAt;
 
     @OneToMany(mappedBy = "blog", cascade = CascadeType.ALL, orphanRemoval = true)
     private List<BlogComment> comments = new ArrayList<>();
@@ -75,6 +82,10 @@ public class Blog {
     public void setAuthor(String authorId, String authorName) {
         this.authorId = authorId;
         this.authorName = authorName;
+    }
+
+    public Instant getCreatedAt() {
+        return createdAt;
     }
 
     public List<BlogComment> getComments() {

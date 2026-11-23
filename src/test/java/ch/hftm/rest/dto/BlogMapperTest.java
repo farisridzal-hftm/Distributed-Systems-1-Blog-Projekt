@@ -27,7 +27,7 @@ class BlogMapperTest {
         blog.setAuthor("internal-keycloak-id", "bob");
         blog.addComment(new BlogComment("Not exposed"));
 
-        assertEquals(new BlogResponse(null, "Title", "Content", "bob"), mapper.toResponse(blog));
+        assertEquals(new BlogResponse(null, "Title", "Content", "bob", null), mapper.toResponse(blog));
     }
 
     @Test
@@ -35,6 +35,6 @@ class BlogMapperTest {
         BlogComment comment = new BlogComment("Nice");
         comment.setAuthor("internal-keycloak-id", "alice");
 
-        assertEquals(new CommentResponse(null, "Nice", "alice"), mapper.toResponse(comment));
+        assertEquals(new CommentResponse(null, "Nice", "alice", null), mapper.toResponse(comment));
     }
 }

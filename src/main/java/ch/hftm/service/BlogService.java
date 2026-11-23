@@ -114,7 +114,7 @@ public class BlogService {
         // Fails fast with 404 instead of returning an empty list for a blog that does not exist.
         getBlog(blogId);
 
-        var comments = blogCommentRepository.list("blog.id", blogId);
+        var comments = blogCommentRepository.list("blog.id", Sort.by("createdAt").and("id"), blogId);
         Log.debugf("Listing %d comments of blog %d", comments.size(), blogId);
         return comments;
     }

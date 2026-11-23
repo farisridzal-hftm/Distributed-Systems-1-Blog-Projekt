@@ -1,5 +1,7 @@
 package ch.hftm.model;
 
+import java.time.Instant;
+import org.hibernate.annotations.CreationTimestamp;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.FetchType;
@@ -25,6 +27,11 @@ public class BlogComment {
 
     /** Login name of the author at the time of writing, for display only. */
     private String authorName;
+
+    /** Set by Hibernate when the comment is first stored; column added by migration V2. */
+    @CreationTimestamp
+    @Column(nullable = false, updatable = false)
+    private Instant createdAt;
 
     @ManyToOne(fetch = FetchType.LAZY)
     private Blog blog;
@@ -59,6 +66,10 @@ public class BlogComment {
     public void setAuthor(String authorId, String authorName) {
         this.authorId = authorId;
         this.authorName = authorName;
+    }
+
+    public Instant getCreatedAt() {
+        return createdAt;
     }
 
     public Blog getBlog() {

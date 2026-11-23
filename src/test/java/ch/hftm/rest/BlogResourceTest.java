@@ -4,10 +4,12 @@ import static io.restassured.RestAssured.given;
 import static org.hamcrest.CoreMatchers.containsString;
 import static org.hamcrest.CoreMatchers.is;
 import static org.hamcrest.CoreMatchers.not;
+import static org.hamcrest.Matchers.contains;
 import static org.hamcrest.Matchers.containsInAnyOrder;
 import static org.hamcrest.Matchers.greaterThanOrEqualTo;
 import static org.hamcrest.Matchers.hasSize;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static ch.hftm.security.TestUsers.BOB;
 import static ch.hftm.security.TestUsers.BOB_ID;
 import ch.hftm.rest.dto.BlogRequest;
@@ -19,6 +21,7 @@ import io.quarkus.test.security.TestSecurity;
 import io.quarkus.test.security.oidc.Claim;
 import io.quarkus.test.security.oidc.OidcSecurity;
 import io.restassured.http.ContentType;
+import io.restassured.mapper.ObjectMapperType;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -38,7 +41,7 @@ class BlogResourceTest {
                 .then()
                 .statusCode(201)
                 .header("Location", containsString("/blogs/"))
-                .extract().as(BlogResponse.class)
+                .extract().as(BlogResponse.class, ObjectMapperType.JSONB)
                 .id();
     }
 
@@ -68,9 +71,10 @@ class BlogResourceTest {
                 .when().get("/blogs/{id}", id)
                 .then()
                 .statusCode(200)
-                .extract().as(BlogResponse.class);
+                .extract().as(BlogResponse.class, ObjectMapperType.JSONB);
 
-        assertEquals(new BlogResponse(id, "Created Blog", "Created through REST", BOB), blog);
+        assertNotNull(blog.createdAt());
+        assertEquals(new BlogResponse(id, "Created Blog", "Created through REST", BOB, blog.createdAt()), blog);
     }
 
     @Test
@@ -155,6 +159,19 @@ class BlogResourceTest {
                 .body("[0].text", is("Nice post!"));
     }
 
+    @Test
+    void commentsAreListedOldestFirst() {
+        Long id = createBlog("Blog With Discussion", "Comments in the order they were written");
+        addComment(id, "First comment");
+        addComment(id, "Second comment");
+
+        given()
+                .when().get("/blogs/{id}/comments", id)
+                .then()
+                .statusCode(200)
+                .body("text", contains("First comment", "Second comment"));
+    }
+
     // --- DTO contract ----------------------------------------------------
 
     @Test
@@ -166,13 +183,13 @@ class BlogResourceTest {
                 .when().get("/blogs/{id}", id)
                 .then()
                 .statusCode(200)
-                .body("keySet()", containsInAnyOrder("id", "title", "content", "author"));
+                .body("keySet()", containsInAnyOrder("id", "title", "content", "author", "createdAt"));
 
         given()
                 .when().get("/blogs")
                 .then()
                 .statusCode(200)
-                .body("[0].keySet()", containsInAnyOrder("id", "title", "content", "author"));
+                .body("[0].keySet()", containsInAnyOrder("id", "title", "content", "author", "createdAt"));
     }
 
     @Test
@@ -184,7 +201,7 @@ class BlogResourceTest {
                 .when().get("/blogs/{id}/comments", id)
                 .then()
                 .statusCode(200)
-                .body("[0].keySet()", containsInAnyOrder("id", "text", "author"));
+                .body("[0].keySet()", containsInAnyOrder("id", "text", "author", "createdAt"));
     }
 
     @Test

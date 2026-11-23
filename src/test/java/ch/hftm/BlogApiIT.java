@@ -28,7 +28,8 @@ class BlogApiIT {
         given().when().get("/blogs")
                 .then().statusCode(200)
                 .body("size()", greaterThanOrEqualTo(2))
-                .body("[0].author", is("bob"));
+                .body("[0].author", is("bob"))
+                .body("[0].createdAt", notNullValue());
     }
 
     @Test
